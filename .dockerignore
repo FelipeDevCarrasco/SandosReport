@@ -1,0 +1,17 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.env
+.DS_Store
+*.log
+uploads/*
+!uploads/.gitkeep
+*.xlsx
+*.xls
+*.csv
+archivo*.xlsx
+README.md
+.vscode
+.idea
+

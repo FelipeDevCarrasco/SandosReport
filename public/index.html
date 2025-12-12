@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sandos Report - Unión de Archivos Excel</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📊 Sandos Report</h1>
+            <p class="subtitle">Carga y une archivos Excel</p>
+        </header>
+
+        <main>
+            <div class="upload-section">
+                <!-- Archivo 1 -->
+                <div class="file-upload-card">
+                    <h2>Archivo de Sphinx</h2>
+                    <div class="upload-area" id="uploadArea1">
+                        <input type="file" id="fileInput1" accept=".xlsx,.xls" hidden>
+                        <div class="upload-content">
+                            <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                            <p class="upload-text">Carga el archivo de Sphinx</p>
+                            <p class="upload-hint">Solo archivos .xlsx o .xls</p>
+                        </div>
+                    </div>
+                    <div class="file-info" id="fileInfo1" style="display: none;">
+                        <div class="file-details">
+                            <span class="file-name" id="fileName1"></span>
+                            <span class="file-stats" id="fileStats1"></span>
+                        </div>
+                        <button class="btn-remove" id="removeFile1">✕</button>
+                    </div>
+                    <div class="progress-container" id="progressContainer1" style="display: none;">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill1"></div>
+                        </div>
+                        <span class="progress-text" id="progressText1">0%</span>
+                    </div>
+                </div>
+
+                <!-- Archivo 2 -->
+                <div class="file-upload-card">
+                    <h2>Archivo de Shipit</h2>
+                    <div class="upload-area" id="uploadArea2">
+                        <input type="file" id="fileInput2" accept=".xlsx,.xls" hidden>
+                        <div class="upload-content">
+                            <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                            <p class="upload-text">Carga el archivo de Shipit</p>
+                            <p class="upload-hint">Solo archivos .xlsx o .xls</p>
+                        </div>
+                    </div>
+                    <div class="file-info" id="fileInfo2" style="display: none;">
+                        <div class="file-details">
+                            <span class="file-name" id="fileName2"></span>
+                            <span class="file-stats" id="fileStats2"></span>
+                        </div>
+                        <button class="btn-remove" id="removeFile2">✕</button>
+                    </div>
+                    <div class="progress-container" id="progressContainer2" style="display: none;">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill2"></div>
+                        </div>
+                        <span class="progress-text" id="progressText2">0%</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Botón para unir archivos -->
+            <div class="merge-section" id="mergeSection" style="display: none;">
+                <button class="btn-merge" id="btnMerge">
+                    🔗 Unir Archivos y Descargar
+                </button>
+            </div>
+
+            <!-- Mensajes de estado -->
+            <div class="message-container" id="messageContainer"></div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+

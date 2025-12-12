@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  sandos-report:
+    build: .
+    container_name: sandos-report
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./uploads:/app/uploads
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+

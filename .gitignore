@@ -1,0 +1,10 @@
+node_modules/
+*.xlsx
+*.xls
+*.csv
+.env
+.DS_Store
+*.log
+uploads/*
+!uploads/.gitkeep
+
