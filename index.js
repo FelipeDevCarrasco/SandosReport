@@ -144,12 +144,127 @@ function procesarArchivoShipit(filePath) {
 }
 
 /**
- * Escribe un archivo Excel con los datos proporcionados
+ * Detecta la categoría del producto basándose en palabras clave
+ * @param {string} producto - Nombre del producto
+ * @returns {string} Categoría del producto
+ */
+function detectarCategoria(producto) {
+  const nombre = String(producto || '').toLowerCase();
+  
+  // Definir categorías y sus palabras clave
+  const categorias = {
+    'Monitores': ['monitor', 'pantalla', 'display', 'screen'],
+    'Fuentes de Poder': ['fuente de poder', 'fuente', 'power supply', 'psu'],
+    'SSD': ['ssd', 'disco sólido', 'solid state'],
+    'HDD': ['hdd', 'disco duro', 'hard disk'],
+    'Memoria RAM': ['ram', 'memoria', 'ddr'],
+    'Procesadores': ['procesador', 'cpu', 'ryzen', 'intel core', 'i3', 'i5', 'i7', 'i9'],
+    'Tarjetas Gráficas': ['tarjeta gráfica', 'gpu', 'geforce', 'radeon', 'rtx', 'gtx'],
+    'Motherboards': ['motherboard', 'placa madre', 'placa base', 'mainboard'],
+    'Gabinetes': ['gabinete', 'case', 'chassis', 'torre'],
+    'Refrigeración': ['cooler', 'ventilador', 'fan', 'water cooling', 'aio'],
+    'Teclados': ['teclado', 'keyboard'],
+    'Mouse': ['mouse', 'ratón'],
+    'Auriculares': ['auricular', 'headset', 'audífono'],
+    'Cables': ['cable', 'conector'],
+    'Otros': [] // Categoría por defecto
+  };
+  
+  // Buscar coincidencias
+  for (const [categoria, palabras] of Object.entries(categorias)) {
+    if (categoria === 'Otros') continue;
+    for (const palabra of palabras) {
+      if (nombre.includes(palabra)) {
+        return categoria;
+      }
+    }
+  }
+  
+  return 'Otros';
+}
+
+/**
+ * Genera un resumen de productos agrupando por SKU y categoría, optimizado para bodega
+ * @param {Array} data - Array de objetos con los datos
+ * @returns {Array} Array de objetos con Categoría, Producto, Cantidad (suma), SKU, ordenado por categoría
+ */
+function generarResumen(data) {
+  try {
+    // Objeto para agrupar por SKU
+    const resumenPorSKU = {};
+    
+    data.forEach(row => {
+      const sku = String(row['SKU'] || '').trim();
+      const producto = String(row['N producto'] || '').trim();
+      const cantidad = parseFloat(row['Cantidad'] || 0) || 0;
+      
+      if (sku) {
+        if (!resumenPorSKU[sku]) {
+          resumenPorSKU[sku] = {
+            SKU: sku,
+            Producto: producto || '',
+            Cantidad: 0,
+            Categoria: detectarCategoria(producto)
+          };
+        }
+        // Sumar la cantidad
+        resumenPorSKU[sku].Cantidad += cantidad;
+      }
+    });
+    
+    // Convertir el objeto a array
+    const resumenArray = Object.values(resumenPorSKU);
+    
+    // Ordenar por categoría primero, luego por nombre de producto dentro de cada categoría
+    const ordenCategorias = [
+      'Monitores',
+      'Fuentes de Poder',
+      'SSD',
+      'HDD',
+      'Memoria RAM',
+      'Procesadores',
+      'Tarjetas Gráficas',
+      'Motherboards',
+      'Gabinetes',
+      'Refrigeración',
+      'Teclados',
+      'Mouse',
+      'Auriculares',
+      'Cables',
+      'Otros'
+    ];
+    
+    resumenArray.sort((a, b) => {
+      // Primero ordenar por categoría
+      const indexA = ordenCategorias.indexOf(a.Categoria);
+      const indexB = ordenCategorias.indexOf(b.Categoria);
+      
+      if (indexA !== indexB) {
+        // Si una categoría no está en la lista, va al final
+        if (indexA === -1) return 1;
+        if (indexB === -1) return -1;
+        return indexA - indexB;
+      }
+      
+      // Si es la misma categoría, ordenar por nombre de producto
+      return String(a.Producto).localeCompare(String(b.Producto));
+    });
+    
+    return resumenArray;
+  } catch (error) {
+    console.error('Error al generar resumen:', error);
+    throw error;
+  }
+}
+
+/**
+ * Escribe un archivo Excel con los datos proporcionados y opcionalmente una hoja de resumen
  * @param {Array} data - Array de objetos con los datos
  * @param {Array} columns - Array con los nombres de las columnas
  * @param {string} outputPath - Ruta donde guardar el archivo
+ * @param {boolean} incluirResumen - Si es true, agrega una hoja "Resumen"
  */
-function escribirExcel(data, columns, outputPath) {
+function escribirExcel(data, columns, outputPath, incluirResumen = false) {
   try {
     // Crear un nuevo workbook
     const workbook = XLSX.utils.book_new();
@@ -163,11 +278,91 @@ function escribirExcel(data, columns, outputPath) {
       worksheetData.push(rowData);
     });
     
-    // Crear la hoja de trabajo
+    // Crear la hoja de trabajo principal
     const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
     
     // Agregar la hoja al workbook
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Datos');
+    
+    // Si se solicita, agregar hoja de resumen
+    if (incluirResumen) {
+      const resumen = generarResumen(data);
+      // Orden de columnas: Categoría, Cantidad, Producto, SKU (intercambiado Producto y Cantidad)
+      const columnasResumen = ['Categoría', 'Cantidad', 'Producto', 'SKU'];
+      
+      // Preparar datos del resumen con agrupación por categoría y subtotales
+      const resumenData = [columnasResumen];
+      let categoriaActual = '';
+      let subtotalCategoria = 0;
+      
+      resumen.forEach((item, index) => {
+        // Si cambió la categoría, agregar subtotal de la categoría anterior
+        if (categoriaActual && categoriaActual !== item.Categoria) {
+          resumenData.push([
+            `SUBTOTAL ${categoriaActual}`,
+            subtotalCategoria,
+            '',
+            ''
+          ]);
+          subtotalCategoria = 0;
+        }
+        
+        // Si es la primera fila o cambió la categoría, agregar encabezado de categoría
+        if (categoriaActual !== item.Categoria) {
+          categoriaActual = item.Categoria;
+          // Agregar fila separadora (opcional, para mejor visualización)
+          if (resumenData.length > 1) {
+            resumenData.push(['', '', '', '']); // Fila vacía como separador
+          }
+        }
+        
+        // Agregar el producto (orden: Categoría, Cantidad, Producto, SKU)
+        resumenData.push([
+          item.Categoria,
+          item.Cantidad,
+          item.Producto,
+          item.SKU
+        ]);
+        
+        subtotalCategoria += item.Cantidad;
+        
+        // Si es el último elemento, agregar el subtotal final
+        if (index === resumen.length - 1) {
+          resumenData.push([
+            `SUBTOTAL ${categoriaActual}`,
+            subtotalCategoria,
+            '',
+            ''
+          ]);
+        }
+      });
+      
+      // Agregar total general al final
+      const totalGeneral = resumen.reduce((sum, item) => sum + item.Cantidad, 0);
+      resumenData.push(['', '', '', '']); // Fila vacía
+      resumenData.push([
+        'TOTAL GENERAL',
+        totalGeneral,
+        '',
+        ''
+      ]);
+      
+      // Crear hoja de resumen
+      const resumenWorksheet = XLSX.utils.aoa_to_sheet(resumenData);
+      
+      // Aplicar formato básico (ancho de columnas aproximado)
+      const colWidths = [
+        { wch: 20 }, // Categoría
+        { wch: 12 }, // Cantidad
+        { wch: 60 }, // Producto
+        { wch: 12 }  // SKU
+      ];
+      resumenWorksheet['!cols'] = colWidths;
+      
+      XLSX.utils.book_append_sheet(workbook, resumenWorksheet, 'Resumen');
+      
+      console.log(`✓ Resumen generado con ${resumen.length} productos únicos agrupados por categoría`);
+    }
     
     // Escribir el archivo
     XLSX.writeFile(workbook, outputPath);
@@ -424,6 +619,17 @@ app.get('/api/merge', (req, res) => {
 
     // Obtener las columnas del archivo 1 y agregar "Courier" al final
     const columnas = [...archivosCargados.archivo1.columns, 'Courier'];
+    
+    // Reordenar columnas: intercambiar Cantidad (columna C) con N producto (columna B)
+    const columnasReordenadas = [...columnas];
+    const indiceCantidad = columnasReordenadas.indexOf('Cantidad');
+    const indiceProducto = columnasReordenadas.indexOf('N producto');
+    
+    if (indiceCantidad !== -1 && indiceProducto !== -1) {
+      // Intercambiar las posiciones: Cantidad va a la posición de N producto y viceversa
+      [columnasReordenadas[indiceCantidad], columnasReordenadas[indiceProducto]] = 
+      [columnasReordenadas[indiceProducto], columnasReordenadas[indiceCantidad]];
+    }
 
     // Generar el archivo Excel
     const now = new Date();
@@ -437,7 +643,8 @@ app.get('/api/merge', (req, res) => {
     const outputFileName = `archivo_unido_${timestamp}.xlsx`;
     const outputPath = path.join(__dirname, 'uploads', outputFileName);
     
-    escribirExcel(archivoUnido, columnas, outputPath);
+    // Escribir el archivo Excel con la hoja de datos y la hoja de resumen
+    escribirExcel(archivoUnido, columnasReordenadas, outputPath, true);
 
     // Enviar el archivo como descarga con headers explícitos
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
