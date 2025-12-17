@@ -255,15 +255,27 @@ function detectarCategoria(producto) {
 
 /**
  * Genera un resumen de productos agrupando por SKU y categoría, optimizado para bodega
- * @param {Array} data - Array de objetos con los datos
+ * Incluye TODOS los datos de las hojas "Datos" y "global" excepto los que tienen "Courier Status" = "delivered"
+ * @param {Array} data - Array de objetos con los datos (incluye Datos y global)
  * @returns {Array} Array de objetos con Categoría, Producto, Cantidad (suma), SKU, ordenado por categoría
  */
 function generarResumen(data) {
   try {
+    console.log(`📊 Generando resumen con ${data.length} registros totales`);
+    
+    // Filtrar registros: excluir los que tienen "Courier Status" = "delivered"
+    const dataFiltrada = data.filter(row => {
+      const courierStatus = String(row['Courier Status'] || '').trim().toLowerCase();
+      return courierStatus !== 'delivered';
+    });
+    
+    console.log(`✅ Filtrando resumen: ${data.length} registros totales, ${dataFiltrada.length} registros después de excluir "delivered"`);
+    
     // Objeto para agrupar por SKU
     const resumenPorSKU = {};
     
-    data.forEach(row => {
+    // Procesar los datos filtrados
+    dataFiltrada.forEach(row => {
       const sku = String(row['SKU'] || '').trim();
       const producto = String(row['N producto'] || '').trim();
       const cantidad = parseFloat(row['Cantidad'] || 0) || 0;
@@ -339,11 +351,19 @@ function escribirExcel(data, columns, outputPath, incluirResumen = false) {
     // Crear un nuevo workbook
     const workbook = XLSX.utils.book_new();
     
-    // Preparar los datos: primero las cabeceras, luego los datos
+    // Filtrar datos para la hoja "Datos": excluir registros con courier "global_tracking"
+    const datosSinGlobal = data.filter(row => {
+      const courier = String(row['Courier'] || '').trim().toLowerCase();
+      return courier !== 'global_tracking';
+    });
+    
+    console.log(`📊 Total de registros: ${data.length}, Registros sin global_tracking: ${datosSinGlobal.length}`);
+    
+    // Preparar los datos: primero las cabeceras, luego los datos (sin global_tracking)
     const worksheetData = [columns]; // Primera fila: cabeceras
     
-    // Agregar los datos
-    data.forEach(row => {
+    // Agregar los datos filtrados
+    datosSinGlobal.forEach(row => {
       const rowData = columns.map(col => row[col] || '');
       worksheetData.push(rowData);
     });
@@ -353,6 +373,32 @@ function escribirExcel(data, columns, outputPath, incluirResumen = false) {
     
     // Agregar la hoja al workbook
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Datos');
+    
+    // Crear hoja "global" con registros donde courier = "global_tracking"
+    const datosGlobal = data.filter(row => {
+      const courier = String(row['Courier'] || '').trim().toLowerCase();
+      return courier === 'global_tracking';
+    });
+    
+    if (datosGlobal.length > 0) {
+      console.log(`📦 Creando hoja "global" con ${datosGlobal.length} registros`);
+      
+      // Preparar los datos para la hoja global
+      const globalData = [columns]; // Primera fila: cabeceras
+      
+      datosGlobal.forEach(row => {
+        const rowData = columns.map(col => row[col] || '');
+        globalData.push(rowData);
+      });
+      
+      // Crear la hoja global
+      const globalWorksheet = XLSX.utils.aoa_to_sheet(globalData);
+      
+      // Agregar la hoja Global al workbook
+      XLSX.utils.book_append_sheet(workbook, globalWorksheet, 'Global');
+    } else {
+      console.log(`📦 No hay registros con courier "global_tracking" para crear hoja "global"`);
+    }
     
     // Si se solicita, agregar hoja de resumen
     if (incluirResumen) {
@@ -451,7 +497,7 @@ function escribirExcel(data, columns, outputPath, incluirResumen = false) {
  * @param {number} filasAEliminar - Número de filas a eliminar desde el inicio
  * @param {Array} columnasPermitidas - Array con los nombres de las columnas a mantener
  */
-function leerExcelEliminandoFilas(filePath, filasAEliminar = 5, columnasPermitidas = ['Doc', 'Folio', 'Observaciones', 'D_cantidad', 'Codigo', 'D_descripcion']) {
+function leerExcelEliminandoFilas(filePath, filasAEliminar = 5, columnasPermitidas = ['Doc', 'Observaciones', 'D_cantidad', 'Codigo', 'D_descripcion']) {
   try {
     if (!fs.existsSync(filePath)) {
       throw new Error(`El archivo ${filePath} no existe`);
@@ -497,11 +543,25 @@ function leerExcelEliminandoFilas(filePath, filasAEliminar = 5, columnasPermitid
       return obj;
     });
 
-    // Filtrar filas que tengan "BVE Pend" o "BVE Nula" en la columna "Doc"
-    const valoresAEliminar = ['BVE Pend', 'BVE Nula'];
+    // Filtrar filas que tengan "BVE Pend", "BVE Nula", o que contengan "NCE" o "GDE" en la columna "Doc"
+    const valoresAEliminarExactos = ['BVE Pend', 'BVE Nula'];
+    const valoresAEliminarContiene = ['NCE', 'GDE'];
     const dataFiltrada = data.filter(row => {
       const valorDoc = String(row.Doc || '').trim();
-      return !valoresAEliminar.includes(valorDoc);
+      
+      // Eliminar si coincide exactamente con valores a eliminar
+      if (valoresAEliminarExactos.includes(valorDoc)) {
+        return false;
+      }
+      
+      // Eliminar si contiene alguno de los valores a eliminar
+      for (const valor of valoresAEliminarContiene) {
+        if (valorDoc.includes(valor)) {
+          return false;
+        }
+      }
+      
+      return true;
     });
 
     // Limpiar la columna "Observaciones" para extraer solo el número del pedido
@@ -523,12 +583,12 @@ function leerExcelEliminandoFilas(filePath, filasAEliminar = 5, columnasPermitid
 
     // Renombrar las columnas según las especificaciones
     const mapeoColumnas = {
-      'Folio': 'N boleta',
       'Observaciones': 'N pedido',
       'D_cantidad': 'Cantidad',
       'Codigo': 'SKU',
       'D_descripcion': 'N producto'
-      // 'Doc' se mantiene igual
+      // 'Doc' se mantiene igual (no se renombra)
+      // 'Folio' se elimina porque la información ya está en 'Doc'
     };
 
     const dataRenombrada = dataLimpia.map(row => {
@@ -666,7 +726,9 @@ async function obtenerDatosShipit(reference) {
       return null;
     }
     
-    const url = `https://orders.shipit.cl/v/orders?reference=${reference}`;
+    // Quitar el "#" del reference para la URL (la API no lo acepta en el parámetro)
+    const referenceParaURL = String(reference).replace(/^#/, '').trim();
+    const url = `https://orders.shipit.cl/v/orders?reference=${referenceParaURL}`;
     
     const response = await fetch(url, {
       method: 'GET',
@@ -693,23 +755,47 @@ async function obtenerDatosShipit(reference) {
     // Necesitamos extraer el primer elemento del array orders
     let orderData = null;
     
+    // Normalizar el reference buscado (quitar # si existe)
+    const referenceBuscado = String(reference).replace(/^#/, '').trim();
+    
     if (data && data.orders && Array.isArray(data.orders) && data.orders.length > 0) {
-      // La respuesta tiene la estructura { orders: [...] }
-      orderData = data.orders[0];
-      console.log(`📋 Estructura correcta: data.orders[0] para ${reference}`);
+      // Buscar el order que coincida exactamente con el reference
+      orderData = data.orders.find(order => {
+        const orderRef = String(order.reference || '').replace(/^#/, '').trim();
+        return orderRef === referenceBuscado;
+      });
+      
+      if (orderData) {
+        console.log(`✅ Order encontrado con referencia exacta: ${reference} -> ${orderData.reference}`);
+      } else {
+        console.warn(`⚠️ No se encontró order con referencia exacta ${reference} en los ${data.orders.length} resultados`);
+        if (data.orders.length > 0) {
+          console.log(`📋 Referencias encontradas:`, data.orders.map(o => o.reference));
+        }
+      }
     } else if (Array.isArray(data) && data.length > 0) {
-      // Si viene directamente como array
-      orderData = data[0];
-      console.log(`📋 Estructura: array directo para ${reference}`);
-    } else if (data && typeof data === 'object') {
-      // Si viene como objeto directo (sin orders)
-      orderData = data;
-      console.log(`📋 Estructura: objeto directo para ${reference}`);
+      // Si viene directamente como array, buscar coincidencia exacta
+      orderData = data.find(order => {
+        const orderRef = String(order.reference || '').replace(/^#/, '').trim();
+        return orderRef === referenceBuscado;
+      });
+      
+      if (!orderData) {
+        console.warn(`⚠️ No se encontró order con referencia exacta ${reference} en array directo`);
+      }
+    } else if (data && typeof data === 'object' && data.reference) {
+      // Si viene como objeto directo, verificar que coincida
+      const orderRef = String(data.reference || '').replace(/^#/, '').trim();
+      if (orderRef === referenceBuscado) {
+        orderData = data;
+        console.log(`✅ Order encontrado (objeto directo) con referencia exacta: ${reference}`);
+      } else {
+        console.warn(`⚠️ Order encontrado pero referencia no coincide: buscado=${reference}, encontrado=${data.reference}`);
+      }
     }
     
     if (!orderData) {
-      console.warn(`⚠️ No se pudo extraer orderData para ${reference}`);
-      console.log(`📋 Estructura recibida:`, JSON.stringify(data, null, 2));
+      console.warn(`⚠️ No se encontró order con referencia exacta para ${reference}`);
       return { courier: '', estado: '' };
     }
     
@@ -753,6 +839,122 @@ async function obtenerDatosShipit(reference) {
   } catch (error) {
     console.error(`❌ Error al consultar orden ${reference}:`, error.message);
     return null;
+  }
+}
+
+/**
+ * Función helper para obtener información de un shipment desde Shipit
+ * @param {string} reference - Referencia del shipment (N Pedido)
+ * @returns {Promise<Object|null>} Objeto con courier_status, o null si hay error
+ */
+async function obtenerDatosShipment(reference) {
+  try {
+    const shipitEmail = process.env.SHIPIT_EMAIL;
+    const shipitAccessToken = process.env.SHIPIT_ACCESS_TOKEN;
+    
+    if (!shipitEmail || !shipitAccessToken) {
+      console.warn(`⚠️ Variables de entorno de Shipit no configuradas para referencia ${reference}`);
+      return null;
+    }
+    
+    // Quitar el "#" del reference para la URL (la API no lo acepta en el parámetro)
+    const referenceParaURL = String(reference).replace(/^#/, '').trim();
+    const url = `https://api.shipit.cl/v/shipments?reference=${referenceParaURL}`;
+    
+    console.log(`🔍 Consultando shipments para referencia: ${reference} (URL: ${referenceParaURL})`);
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'X-Shipit-Email': shipitEmail,
+        'X-Shipit-Access-Token': shipitAccessToken,
+        'Accept': 'application/vnd.shipit.v4',
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        console.warn(`⚠️ Shipment ${reference} no encontrado en Shipit (404)`);
+      } else {
+        console.warn(`⚠️ Error ${response.status} al consultar shipment ${reference}`);
+      }
+      // Si hay error o 404, retornar "Envio No Solicitado"
+      return { courier_status: 'Envio No Solicitado' };
+    }
+    
+    const data = await response.json();
+    
+    // La respuesta de Shipit viene como objeto con estructura:
+    // { shipments: [{ ... }], total: X }
+    // IMPORTANTE: La API puede devolver múltiples resultados, necesitamos encontrar el que coincida EXACTAMENTE
+    let shipmentData = null;
+    
+    // Normalizar el reference buscado (quitar # si existe)
+    const referenceBuscado = String(reference).replace(/^#/, '').trim();
+    
+    if (data && data.shipments && Array.isArray(data.shipments)) {
+      // Buscar el shipment que coincida exactamente con el reference
+      shipmentData = data.shipments.find(shipment => {
+        const shipmentRef = String(shipment.reference || '').replace(/^#/, '').trim();
+        return shipmentRef === referenceBuscado;
+      });
+      
+      if (shipmentData) {
+        console.log(`✅ Shipment encontrado con referencia exacta: ${reference} -> ${shipmentData.reference}`);
+      } else {
+        console.warn(`⚠️ No se encontró shipment con referencia exacta ${reference} en los ${data.shipments.length} resultados`);
+        if (data.shipments.length > 0) {
+          console.log(`📋 Referencias encontradas:`, data.shipments.map(s => s.reference));
+        }
+      }
+    } else if (Array.isArray(data) && data.length > 0) {
+      // Si viene como array directo, buscar coincidencia exacta
+      shipmentData = data.find(shipment => {
+        const shipmentRef = String(shipment.reference || '').replace(/^#/, '').trim();
+        return shipmentRef === referenceBuscado;
+      });
+      
+      if (!shipmentData) {
+        console.warn(`⚠️ No se encontró shipment con referencia exacta ${reference} en array directo`);
+      }
+    } else if (data && typeof data === 'object' && data.reference) {
+      // Si viene como objeto directo, verificar que coincida
+      const shipmentRef = String(data.reference || '').replace(/^#/, '').trim();
+      if (shipmentRef === referenceBuscado) {
+        shipmentData = data;
+        console.log(`✅ Shipment encontrado (objeto directo) con referencia exacta: ${reference}`);
+      } else {
+        console.warn(`⚠️ Shipment encontrado pero referencia no coincide: buscado=${reference}, encontrado=${data.reference}`);
+      }
+    }
+    
+    if (!shipmentData) {
+      console.warn(`⚠️ No se encontró shipment con referencia exacta para ${reference}`);
+      console.log(`📋 La API de Shipit devolvió resultados pero ninguno coincide exactamente con ${reference}`);
+      // Retornar "Envio No Solicitado" cuando no hay coincidencia exacta
+      return { courier_status: 'Envio No Solicitado' };
+    }
+    
+    // Extraer courier_status
+    let courierStatus = '';
+    
+    if (shipmentData.courier_status) {
+      courierStatus = String(shipmentData.courier_status);
+      console.log(`✅ Courier Status extraído: "${courierStatus}"`);
+    } else {
+      console.warn(`⚠️ No se encontró courier_status para ${reference}`);
+      // Si el shipment existe pero no tiene courier_status, también considerar como "Envio No Solicitado"
+      courierStatus = 'Envio No Solicitado';
+    }
+    
+    console.log(`✅ RESULTADO FINAL shipment para ${reference}: courier_status="${courierStatus}"`);
+    
+    return { courier_status: courierStatus };
+  } catch (error) {
+    console.error(`❌ Error al consultar shipment ${reference}:`, error.message);
+    // En caso de error, retornar "Envio No Solicitado"
+    return { courier_status: 'Envio No Solicitado' };
   }
 }
 
@@ -902,7 +1104,7 @@ app.get('/api/merge', async (req, res) => {
     let archivo1 = [...archivosCargados.archivo1.data];
 
     console.log(`📊 Procesando ${archivo1.length} filas...`);
-    console.log(`🔍 Consultando API de Shipit para obtener Courier y Estado...`);
+    console.log(`🔍 Consultando API de Shipit para obtener Courier, Estado y Courier Status...`);
 
     // Obtener valores únicos de N Pedido para optimizar consultas
     // Primero, verificar qué columnas tenemos disponibles
@@ -926,16 +1128,28 @@ app.get('/api/merge', async (req, res) => {
     
     console.log(`📦 Encontrados ${pedidosUnicos.length} pedidos únicos:`, pedidosUnicos.slice(0, 10));
 
-    // Crear un mapa de pedido -> datos de Shipit
+    // Crear un mapa de pedido -> datos de Shipit (orders y shipments)
     const mapaShipit = {};
     
-    // Consultar Shipit para cada pedido único (con límite de concurrencia)
+    // Consultar Shipit Orders y Shipments para cada pedido único (con límite de concurrencia)
     const BATCH_SIZE = 10; // Procesar 10 pedidos a la vez para no sobrecargar la API
     for (let i = 0; i < pedidosUnicos.length; i += BATCH_SIZE) {
       const batch = pedidosUnicos.slice(i, i + BATCH_SIZE);
       const promesas = batch.map(async (pedido) => {
-        const datos = await obtenerDatosShipit(pedido);
-        return { pedido, datos };
+        // Consultar ambos endpoints en paralelo
+        const [datosOrder, datosShipment] = await Promise.all([
+          obtenerDatosShipit(pedido),
+          obtenerDatosShipment(pedido)
+        ]);
+        
+        // Combinar los datos de ambos endpoints
+        const datosCombinados = {
+          courier: datosOrder?.courier || '',
+          estado: datosOrder?.estado || '',
+          courier_status: datosShipment?.courier_status || 'Envio No Solicitado'
+        };
+        
+        return { pedido, datos: datosCombinados };
       });
       
       const resultados = await Promise.all(promesas);
@@ -944,7 +1158,7 @@ app.get('/api/merge', async (req, res) => {
           mapaShipit[pedido] = datos;
         } else {
           // Si no hay datos, guardar valores vacíos pero registrar el pedido
-          mapaShipit[pedido] = { courier: '', estado: '' };
+          mapaShipit[pedido] = { courier: '', estado: '', courier_status: '' };
           console.log(`⚠️ No se obtuvieron datos para pedido: ${pedido}`);
         }
       });
@@ -976,15 +1190,17 @@ app.get('/api/merge', async (req, res) => {
       if (nPedido && mapaShipit[nPedido]) {
         nuevoRow['Courier'] = mapaShipit[nPedido].courier || '';
         nuevoRow['Estado'] = mapaShipit[nPedido].estado || '';
+        nuevoRow['Courier Status'] = mapaShipit[nPedido].courier_status || '';
         
         // Log para las primeras filas para debugging
         if (index < 5) {
-          console.log(`📝 Fila ${index + 1}: N pedido="${nPedido}" -> Courier="${nuevoRow['Courier']}", Estado="${nuevoRow['Estado']}"`);
+          console.log(`📝 Fila ${index + 1}: N pedido="${nPedido}" -> Courier="${nuevoRow['Courier']}", Estado="${nuevoRow['Estado']}", Courier Status="${nuevoRow['Courier Status']}"`);
           console.log(`   Datos en mapaShipit:`, mapaShipit[nPedido]);
         }
       } else {
         nuevoRow['Courier'] = '';
         nuevoRow['Estado'] = '';
+        nuevoRow['Courier Status'] = '';
         
         // Log si no encontramos datos para debugging
         if (index < 5) {
@@ -1003,8 +1219,8 @@ app.get('/api/merge', async (req, res) => {
     
     console.log(`✅ Archivo procesado con ${archivo1.length} filas`);
 
-    // Obtener las columnas del archivo 1 y agregar Courier y Estado
-    const columnas = [...archivosCargados.archivo1.columns, 'Courier', 'Estado'];
+    // Obtener las columnas del archivo 1 y agregar Courier, Estado y Courier Status
+    const columnas = [...archivosCargados.archivo1.columns, 'Courier', 'Estado', 'Courier Status'];
     
     // Reordenar columnas: intercambiar Cantidad (columna C) con N producto (columna B)
     const columnasReordenadas = [...columnas];
