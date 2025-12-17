@@ -302,9 +302,49 @@ sudo systemctl reload nginx
 - `multer` - Manejo de carga de archivos
 - `xlsx` - Para leer archivos Excel
 - `cors` - Habilitar CORS
+- `dotenv` - Manejo de variables de entorno
+- `node-fetch` - Cliente HTTP para consumir APIs externas
+
+## API Endpoints
+
+### Endpoints de archivos
+
+- `POST /api/upload/file1` - Cargar y procesar archivo de Sphinx
+- `GET /api/status` - Obtener estado de los archivos cargados
+- `GET /api/download/processed` - Descargar archivo procesado
+- `GET /api/merge` - Procesar y descargar archivo con resumen
+
+### Endpoints de Shipit
+
+- `GET /api/shipit/order/:reference` - Obtener información de una orden desde Shipit
+
+**Ejemplo de uso:**
+```bash
+curl http://localhost:3000/api/shipit/order/15744
+```
+
+Este endpoint requiere que las variables de entorno `SHIPIT_EMAIL` y `SHIPIT_ACCESS_TOKEN` estén configuradas.
 
 ## Variables de Entorno
 
+Crea un archivo `.env` en la raíz del proyecto con las siguientes variables:
+
+```env
+PORT=3000
+SHIPIT_EMAIL=tu_email@ejemplo.com
+SHIPIT_ACCESS_TOKEN=tu_access_token_aqui
+```
+
+### Variables disponibles:
+
 - `PORT` - Puerto del servidor (por defecto: 3000)
 - `NODE_ENV` - Entorno de ejecución (production/development)
+- `SHIPIT_EMAIL` - Email para autenticación en la API de Shipit
+- `SHIPIT_ACCESS_TOKEN` - Token de acceso para la API de Shipit
+
+### Configuración con Docker
+
+Cuando uses Docker Compose, el archivo `.env` se cargará automáticamente. Asegúrate de crear el archivo `.env` antes de ejecutar `docker-compose up`.
+
+**Importante:** El archivo `.env` está en `.gitignore` y no se subirá al repositorio. Crea un archivo `.env.example` como plantilla si lo necesitas.
 

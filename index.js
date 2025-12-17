@@ -5,6 +5,11 @@ import XLSX from 'xlsx';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
+import fetch from 'node-fetch';
+
+// Cargar variables de entorno
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,8 +55,7 @@ const upload = multer({
 
 // Almacenar información de los archivos cargados
 let archivosCargados = {
-  archivo1: null,
-  archivo2: null
+  archivo1: null
 };
 
 /**
@@ -79,104 +83,170 @@ function leerExcel(filePath) {
   }
 }
 
-/**
- * Procesa el archivo 2 (Shipit): mantiene solo "ID orden" y "Courier", y elimina "#" de ID orden
- * @param {string} filePath - Ruta del archivo
- */
-function procesarArchivoShipit(filePath) {
-  try {
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`El archivo ${filePath} no existe`);
-    }
-
-    const workbook = XLSX.readFile(filePath);
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json(worksheet);
-
-    // Columnas a mantener
-    const columnasPermitidas = ['ID orden', 'Courier'];
-    
-    // Verificar que las columnas existan
-    if (data.length === 0) {
-      throw new Error('El archivo está vacío');
-    }
-
-    const columnasDisponibles = Object.keys(data[0]);
-    const columnasEncontradas = columnasPermitidas.filter(col => 
-      columnasDisponibles.includes(col)
-    );
-
-    if (columnasEncontradas.length === 0) {
-      throw new Error('No se encontraron las columnas "ID orden" o "Courier" en el archivo');
-    }
-
-    // Filtrar datos: mantener solo las columnas permitidas y limpiar "ID orden"
-    const dataProcesada = data.map(row => {
-      const nuevoRow = {};
-      
-      // Procesar "ID orden": quitar el "#"
-      if (row['ID orden']) {
-        nuevoRow['ID orden'] = String(row['ID orden']).replace(/^#/, '').trim();
-      } else {
-        nuevoRow['ID orden'] = '';
-      }
-      
-      // Mantener "Courier"
-      if (row['Courier']) {
-        nuevoRow['Courier'] = String(row['Courier']).trim();
-      } else {
-        nuevoRow['Courier'] = '';
-      }
-      
-      return nuevoRow;
-    });
-
-    return {
-      data: dataProcesada,
-      sheetNames: workbook.SheetNames,
-      rowCount: dataProcesada.length,
-      columns: columnasEncontradas
-    };
-  } catch (error) {
-    throw error;
-  }
-}
 
 /**
  * Detecta la categoría del producto basándose en palabras clave
+ * IMPORTANTE: El orden importa - categorías más específicas primero
  * @param {string} producto - Nombre del producto
  * @returns {string} Categoría del producto
  */
 function detectarCategoria(producto) {
   const nombre = String(producto || '').toLowerCase();
   
-  // Definir categorías y sus palabras clave
-  const categorias = {
-    'Monitores': ['monitor', 'pantalla', 'display', 'screen'],
-    'Fuentes de Poder': ['fuente de poder', 'fuente', 'power supply', 'psu'],
-    'SSD': ['ssd', 'disco sólido', 'solid state'],
-    'HDD': ['hdd', 'disco duro', 'hard disk'],
-    'Memoria RAM': ['ram', 'memoria', 'ddr'],
-    'Procesadores': ['procesador', 'cpu', 'ryzen', 'intel core', 'i3', 'i5', 'i7', 'i9'],
-    'Tarjetas Gráficas': ['tarjeta gráfica', 'gpu', 'geforce', 'radeon', 'rtx', 'gtx'],
-    'Motherboards': ['motherboard', 'placa madre', 'placa base', 'mainboard'],
-    'Gabinetes': ['gabinete', 'case', 'chassis', 'torre'],
-    'Refrigeración': ['cooler', 'ventilador', 'fan', 'water cooling', 'aio'],
-    'Teclados': ['teclado', 'keyboard'],
-    'Mouse': ['mouse', 'ratón'],
-    'Auriculares': ['auricular', 'headset', 'audífono'],
-    'Cables': ['cable', 'conector'],
-    'Otros': [] // Categoría por defecto
-  };
-  
-  // Buscar coincidencias
-  for (const [categoria, palabras] of Object.entries(categorias)) {
-    if (categoria === 'Otros') continue;
-    for (const palabra of palabras) {
-      if (nombre.includes(palabra)) {
-        return categoria;
+  // Definir categorías en orden de especificidad (más específicas primero)
+  // Array de objetos con categoria y función de verificación
+  const categorias = [
+    {
+      nombre: 'Tarjetas Gráficas',
+      // Verificar primero porque puede contener "ddr" pero es más específico
+      verificar: (n) => {
+        return n.includes('tarjeta gráfica') || 
+               n.includes('tarjeta de video') ||
+               n.includes('gpu') ||
+               n.includes('geforce') ||
+               n.includes('radeon') ||
+               n.includes('rtx') ||
+               n.includes('gtx') ||
+               n.includes('video card');
       }
+    },
+    {
+      nombre: 'Motherboards',
+      // Verificar antes que RAM porque las placas pueden mencionar DDR
+      verificar: (n) => {
+        return n.includes('motherboard') || 
+               n.includes('placa madre') ||
+               n.includes('placa base') ||
+               n.includes('mainboard') ||
+               n.includes('mobo');
+      }
+    },
+    {
+      nombre: 'Memoria RAM',
+      // Más específico: debe contener "memoria" o "ram" pero NO ser placa o tarjeta
+      verificar: (n) => {
+        // Excluir si es placa madre o tarjeta gráfica
+        if (n.includes('placa madre') || n.includes('placa base') || 
+            n.includes('motherboard') || n.includes('mainboard') ||
+            n.includes('tarjeta gráfica') || n.includes('tarjeta de video') ||
+            n.includes('gpu') || n.includes('geforce') || n.includes('radeon')) {
+          return false;
+        }
+        // Buscar patrones específicos de RAM
+        return (n.includes('memoria ram') || 
+                n.includes('memoria para notebook') ||
+                n.includes('memoria para pc') ||
+                n.includes('memoria ddr') ||
+                (n.includes('ram') && (n.includes('ddr') || n.includes('so-dimm') || n.includes('dimension'))) ||
+                n.includes('memory module'));
+      }
+    },
+    {
+      nombre: 'Procesadores',
+      verificar: (n) => {
+        return n.includes('procesador') || 
+               n.includes('cpu') ||
+               n.includes('ryzen') ||
+               n.includes('intel core') ||
+               n.includes(' i3 ') ||
+               n.includes(' i5 ') ||
+               n.includes(' i7 ') ||
+               n.includes(' i9 ') ||
+               n.includes('pentium') ||
+               n.includes('celeron');
+      }
+    },
+    {
+      nombre: 'SSD',
+      verificar: (n) => {
+        return n.includes('ssd') || 
+               n.includes('disco sólido') ||
+               n.includes('solid state') ||
+               n.includes('nvme') ||
+               n.includes('m.2');
+      }
+    },
+    {
+      nombre: 'HDD',
+      verificar: (n) => {
+        return n.includes('hdd') || 
+               n.includes('disco duro') ||
+               n.includes('hard disk');
+      }
+    },
+    {
+      nombre: 'Fuentes de Poder',
+      verificar: (n) => {
+        return n.includes('fuente de poder') || 
+               n.includes('power supply') ||
+               n.includes('psu') ||
+               (n.includes('fuente') && !n.includes('aliment'));
+      }
+    },
+    {
+      nombre: 'Monitores',
+      verificar: (n) => {
+        return n.includes('monitor') || 
+               n.includes('pantalla') ||
+               n.includes('display') ||
+               n.includes('screen');
+      }
+    },
+    {
+      nombre: 'Teclados',
+      verificar: (n) => {
+        return n.includes('teclado') || 
+               n.includes('keyboard');
+      }
+    },
+    {
+      nombre: 'Mouse',
+      verificar: (n) => {
+        return n.includes('mouse') || 
+               n.includes('ratón');
+      }
+    },
+    {
+      nombre: 'Auriculares',
+      verificar: (n) => {
+        return n.includes('auricular') || 
+               n.includes('headset') ||
+               n.includes('audífono');
+      }
+    },
+    {
+      nombre: 'Refrigeración',
+      verificar: (n) => {
+        return n.includes('cooler') || 
+               n.includes('ventilador') ||
+               n.includes('fan') ||
+               n.includes('water cooling') ||
+               n.includes('aio') ||
+               n.includes('refrigeración');
+      }
+    },
+    {
+      nombre: 'Gabinetes',
+      verificar: (n) => {
+        return n.includes('gabinete') || 
+               n.includes('case') ||
+               n.includes('chassis') ||
+               n.includes('torre');
+      }
+    },
+    {
+      nombre: 'Cables',
+      verificar: (n) => {
+        return n.includes('cable') || 
+               n.includes('conector');
+      }
+    }
+  ];
+  
+  // Buscar coincidencias en orden (más específicas primero)
+  for (const categoria of categorias) {
+    if (categoria.verificar(nombre)) {
+      return categoria.nombre;
     }
   }
   
@@ -504,9 +574,49 @@ app.post('/api/upload/file1', upload.single('file'), async (req, res) => {
 
     await new Promise(resolve => setTimeout(resolve, 200)); // Simular procesamiento
 
+    // Generar y guardar el archivo procesado en la raíz del proyecto
+    let processedFilePath = null;
+    let processedFileName = null;
+    try {
+      const archivo1 = resultado.data;
+      const columnas = resultado.columns;
+      
+      // Reordenar columnas: intercambiar Cantidad con N producto
+      const columnasReordenadas = [...columnas];
+      const indiceCantidad = columnasReordenadas.indexOf('Cantidad');
+      const indiceProducto = columnasReordenadas.indexOf('N producto');
+      
+      if (indiceCantidad !== -1 && indiceProducto !== -1) {
+        [columnasReordenadas[indiceCantidad], columnasReordenadas[indiceProducto]] = 
+        [columnasReordenadas[indiceProducto], columnasReordenadas[indiceCantidad]];
+      }
+
+      // Generar nombre del archivo con timestamp
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const seconds = String(now.getSeconds()).padStart(2, '0');
+      const timestamp = `${year}-${month}-${day}T${hours}-${minutes}-${seconds}`;
+      processedFileName = `archivo1_procesado_${timestamp}.xlsx`;
+      processedFilePath = path.join(__dirname, processedFileName);
+      
+      // Escribir el archivo Excel procesado en la raíz con resumen
+      escribirExcel(archivo1, columnasReordenadas, processedFilePath, true);
+      
+      console.log(`✓ Archivo procesado guardado en la raíz: ${processedFileName}`);
+    } catch (error) {
+      console.error('Error al guardar archivo procesado en la raíz:', error);
+      // No fallar la respuesta si hay error al guardar
+    }
+
     archivosCargados.archivo1 = {
       filename: req.file.originalname,
       path: filePath,
+      processedFilePath: processedFilePath,
+      processedFileName: processedFileName,
       ...resultado
     };
 
@@ -528,40 +638,6 @@ app.post('/api/upload/file1', upload.single('file'), async (req, res) => {
   }
 });
 
-// Endpoint para cargar el segundo archivo
-app.post('/api/upload/file2', upload.single('file'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No se proporcionó ningún archivo' });
-    }
-
-    const filePath = req.file.path;
-    // Procesar el archivo 2 (Shipit): mantener solo ID orden y Courier, quitar "#" de ID orden
-    const resultado = procesarArchivoShipit(filePath);
-
-    archivosCargados.archivo2 = {
-      filename: req.file.originalname,
-      path: filePath,
-      ...resultado
-    };
-
-    res.json({
-      success: true,
-      message: 'Archivo de Shipit procesado correctamente',
-      info: {
-        filename: req.file.originalname,
-        rows: resultado.rowCount,
-        columns: resultado.columns,
-        sheets: resultado.sheetNames
-      }
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      error: 'Error al procesar el archivo',
-      message: error.message 
-    });
-  }
-});
 
 // Endpoint para obtener el estado de los archivos cargados
 app.get('/api/status', (req, res) => {
@@ -569,56 +645,366 @@ app.get('/api/status', (req, res) => {
     archivo1: archivosCargados.archivo1 ? {
       filename: archivosCargados.archivo1.filename,
       rows: archivosCargados.archivo1.rowCount,
-      columns: archivosCargados.archivo1.columns.length
-    } : null,
-    archivo2: archivosCargados.archivo2 ? {
-      filename: archivosCargados.archivo2.filename,
-      rows: archivosCargados.archivo2.rowCount,
-      columns: archivosCargados.archivo2.columns.length
+      columns: archivosCargados.archivo1.columns.length,
+      processedFileName: archivosCargados.archivo1.processedFileName
     } : null
   });
 });
 
-// Endpoint para unir los archivos y descargar el resultado
-app.get('/api/merge', (req, res) => {
+/**
+ * Función helper para obtener información de una orden desde Shipit
+ * @param {string} reference - Referencia de la orden (N Pedido)
+ * @returns {Promise<Object|null>} Objeto con courier y estado, o null si hay error
+ */
+async function obtenerDatosShipit(reference) {
   try {
-    // Verificar que ambos archivos estén cargados
-    if (!archivosCargados.archivo1 || !archivosCargados.archivo2) {
+    const shipitEmail = process.env.SHIPIT_EMAIL;
+    const shipitAccessToken = process.env.SHIPIT_ACCESS_TOKEN;
+    
+    if (!shipitEmail || !shipitAccessToken) {
+      console.warn(`⚠️ Variables de entorno de Shipit no configuradas para referencia ${reference}`);
+      return null;
+    }
+    
+    const url = `https://orders.shipit.cl/v/orders?reference=${reference}`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'X-Shipit-Email': shipitEmail,
+        'X-Shipit-Access-Token': shipitAccessToken,
+        'Accept': 'application/vnd.orders.v1'
+      }
+    });
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        console.warn(`⚠️ Orden ${reference} no encontrada en Shipit`);
+      } else {
+        console.warn(`⚠️ Error ${response.status} al consultar orden ${reference}`);
+      }
+      return null;
+    }
+    
+    const data = await response.json();
+    
+    // La respuesta de Shipit viene como objeto con estructura:
+    // { orders: [{ ... }], total: 1 }
+    // Necesitamos extraer el primer elemento del array orders
+    let orderData = null;
+    
+    if (data && data.orders && Array.isArray(data.orders) && data.orders.length > 0) {
+      // La respuesta tiene la estructura { orders: [...] }
+      orderData = data.orders[0];
+      console.log(`📋 Estructura correcta: data.orders[0] para ${reference}`);
+    } else if (Array.isArray(data) && data.length > 0) {
+      // Si viene directamente como array
+      orderData = data[0];
+      console.log(`📋 Estructura: array directo para ${reference}`);
+    } else if (data && typeof data === 'object') {
+      // Si viene como objeto directo (sin orders)
+      orderData = data;
+      console.log(`📋 Estructura: objeto directo para ${reference}`);
+    }
+    
+    if (!orderData) {
+      console.warn(`⚠️ No se pudo extraer orderData para ${reference}`);
+      console.log(`📋 Estructura recibida:`, JSON.stringify(data, null, 2));
+      return { courier: '', estado: '' };
+    }
+    
+    console.log(`📋 OrderData para ${reference}:`, JSON.stringify(orderData, null, 2));
+    
+    // Extraer courier.client y state
+    let courier = '';
+    let estado = '';
+    
+    // Extraer courier.client
+    if (orderData.courier && orderData.courier.client) {
+      courier = String(orderData.courier.client);
+      console.log(`✅ Courier extraído: "${courier}"`);
+    } else {
+      console.warn(`⚠️ No se encontró courier.client para ${reference}`);
+      if (orderData.courier) {
+        console.log(`📦 Estructura courier disponible:`, JSON.stringify(orderData.courier));
+      }
+    }
+    
+    // Extraer state
+    if (orderData.state) {
+      const stateLower = String(orderData.state).toLowerCase();
+      console.log(`📊 Estado original: "${orderData.state}" (lowercase: "${stateLower}")`);
+      
+      if (stateLower === 'deliver' || stateLower === 'delivered') {
+        estado = 'Enviado';
+      } else if (stateLower === 'confirmed' || stateLower === 'confirm') {
+        estado = 'Listo para enviar';
+      } else {
+        estado = String(orderData.state);
+      }
+      console.log(`✅ Estado mapeado: "${estado}"`);
+    } else {
+      console.warn(`⚠️ No se encontró state para ${reference}`);
+    }
+    
+    console.log(`✅ RESULTADO FINAL para ${reference}: courier="${courier}", estado="${estado}"`);
+    
+    return { courier, estado };
+  } catch (error) {
+    console.error(`❌ Error al consultar orden ${reference}:`, error.message);
+    return null;
+  }
+}
+
+// Endpoint para obtener información de una orden desde Shipit
+app.get('/api/shipit/order/:reference', async (req, res) => {
+  try {
+    const { reference } = req.params;
+    
+    // Validar que las variables de entorno estén configuradas
+    const shipitEmail = process.env.SHIPIT_EMAIL;
+    const shipitAccessToken = process.env.SHIPIT_ACCESS_TOKEN;
+    
+    if (!shipitEmail || !shipitAccessToken) {
+      console.error('❌ Variables de entorno de Shipit no configuradas');
+      return res.status(500).json({ 
+        error: 'Variables de entorno de Shipit no configuradas',
+        message: 'SHIPIT_EMAIL y SHIPIT_ACCESS_TOKEN deben estar configuradas en el archivo .env'
+      });
+    }
+    
+    // Construir la URL del endpoint
+    const url = `https://orders.shipit.cl/v/orders?reference=${reference}`;
+    
+    console.log(`🔍 Consultando API de Shipit para referencia: ${reference}`);
+    console.log(`📧 Email: ${shipitEmail}`);
+    console.log(`🔗 URL: ${url}`);
+    
+    // Realizar la petición a la API de Shipit
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'X-Shipit-Email': shipitEmail,
+        'X-Shipit-Access-Token': shipitAccessToken,
+        'Accept': 'application/vnd.orders.v1'
+      }
+    });
+    
+    console.log(`📡 Respuesta de Shipit: ${response.status} ${response.statusText}`);
+    
+    // Verificar el estado de la respuesta
+    if (!response.ok) {
+      let errorText;
+      try {
+        errorText = await response.text();
+        // Intentar parsear como JSON si es posible
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorText = JSON.stringify(errorJson, null, 2);
+        } catch (e) {
+          // Si no es JSON, usar el texto tal cual
+        }
+      } catch (e) {
+        errorText = `HTTP ${response.status}: ${response.statusText}`;
+      }
+      
+      console.error(`❌ Error ${response.status} de Shipit:`, errorText);
+      
+      // Mensajes más específicos según el código de estado
+      let errorMessage = errorText;
+      if (response.status === 404) {
+        errorMessage = `La orden con referencia "${reference}" no fue encontrada en Shipit. Verifica que la referencia sea correcta.`;
+      } else if (response.status === 401 || response.status === 403) {
+        errorMessage = `Error de autenticación. Verifica que SHIPIT_EMAIL y SHIPIT_ACCESS_TOKEN sean correctos.`;
+      }
+      
+      return res.status(response.status).json({ 
+        error: 'Error al consultar la API de Shipit',
+        message: errorMessage,
+        statusCode: response.status,
+        reference: reference
+      });
+    }
+    
+    // Parsear la respuesta JSON
+    const data = await response.json();
+    
+    console.log(`✅ Orden encontrada: ${reference}`);
+    
+    res.json({
+      success: true,
+      data: data,
+      reference: reference
+    });
+  } catch (error) {
+    console.error('❌ Error al consultar API de Shipit:', error);
+    res.status(500).json({ 
+      error: 'Error al consultar la API de Shipit',
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
+// Endpoint para descargar el archivo procesado
+app.get('/api/download/processed', (req, res) => {
+  try {
+    if (!archivosCargados.archivo1 || !archivosCargados.archivo1.processedFilePath) {
       return res.status(400).json({ 
-        error: 'Ambos archivos deben estar cargados para realizar la unión' 
+        error: 'No hay archivo procesado disponible para descargar' 
       });
     }
 
-    const archivo1 = archivosCargados.archivo1.data;
-    const archivo2 = archivosCargados.archivo2.data;
+    const processedFilePath = archivosCargados.archivo1.processedFilePath;
+    const processedFileName = archivosCargados.archivo1.processedFileName || 'archivo_procesado.xlsx';
 
-    // Crear un mapa del archivo 2: ID orden -> Courier
-    const mapaCourier = {};
-    archivo2.forEach(row => {
-      const idOrden = String(row['ID orden'] || '').trim();
-      const courier = String(row['Courier'] || '').trim();
-      if (idOrden) {
-        mapaCourier[idOrden] = courier;
+    if (!fs.existsSync(processedFilePath)) {
+      return res.status(404).json({ 
+        error: 'El archivo procesado no existe' 
+      });
+    }
+
+    // Enviar el archivo como descarga
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    const encodedFileName = encodeURIComponent(processedFileName);
+    res.setHeader('Content-Disposition', `attachment; filename="${processedFileName}"; filename*=UTF-8''${encodedFileName}`);
+    
+    const fileStream = fs.createReadStream(processedFilePath);
+    fileStream.pipe(res);
+    
+    fileStream.on('error', (err) => {
+      console.error('Error al descargar el archivo procesado:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ 
+          error: 'Error al descargar el archivo',
+          message: err.message 
+        });
       }
     });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Error al descargar el archivo procesado',
+      message: error.message 
+    });
+  }
+});
 
-    // Agregar la columna "Courier" al archivo 1 basándose en "N pedido"
-    const archivoUnido = archivo1.map(row => {
-      const nuevoRow = { ...row };
-      const nPedido = String(row['N pedido'] || '').trim();
+// Endpoint para procesar y descargar el archivo
+app.get('/api/merge', async (req, res) => {
+  try {
+    // Verificar que el archivo esté cargado
+    if (!archivosCargados.archivo1) {
+      return res.status(400).json({ 
+        error: 'El archivo debe estar cargado para procesarlo' 
+      });
+    }
+
+    let archivo1 = [...archivosCargados.archivo1.data];
+
+    console.log(`📊 Procesando ${archivo1.length} filas...`);
+    console.log(`🔍 Consultando API de Shipit para obtener Courier y Estado...`);
+
+    // Obtener valores únicos de N Pedido para optimizar consultas
+    // Primero, verificar qué columnas tenemos disponibles
+    if (archivo1.length > 0) {
+      console.log(`📋 Columnas disponibles:`, Object.keys(archivo1[0]));
+      console.log(`📋 Primera fila de ejemplo:`, archivo1[0]);
+    }
+    
+    const pedidosUnicos = [...new Set(archivo1.map(row => {
+      // Intentar diferentes variaciones del nombre de la columna
+      const pedido = String(
+        row['N pedido'] || 
+        row['N Pedido'] || 
+        row['n pedido'] || 
+        row['N° pedido'] ||
+        row['N° Pedido'] ||
+        ''
+      ).trim();
+      return pedido;
+    }).filter(p => p && p !== ''))];
+    
+    console.log(`📦 Encontrados ${pedidosUnicos.length} pedidos únicos:`, pedidosUnicos.slice(0, 10));
+
+    // Crear un mapa de pedido -> datos de Shipit
+    const mapaShipit = {};
+    
+    // Consultar Shipit para cada pedido único (con límite de concurrencia)
+    const BATCH_SIZE = 10; // Procesar 10 pedidos a la vez para no sobrecargar la API
+    for (let i = 0; i < pedidosUnicos.length; i += BATCH_SIZE) {
+      const batch = pedidosUnicos.slice(i, i + BATCH_SIZE);
+      const promesas = batch.map(async (pedido) => {
+        const datos = await obtenerDatosShipit(pedido);
+        return { pedido, datos };
+      });
       
-      // Buscar el Courier correspondiente en el mapa
-      if (mapaCourier[nPedido]) {
-        nuevoRow['Courier'] = mapaCourier[nPedido];
+      const resultados = await Promise.all(promesas);
+      resultados.forEach(({ pedido, datos }) => {
+        if (datos && typeof datos === 'object') {
+          mapaShipit[pedido] = datos;
+        } else {
+          // Si no hay datos, guardar valores vacíos pero registrar el pedido
+          mapaShipit[pedido] = { courier: '', estado: '' };
+          console.log(`⚠️ No se obtuvieron datos para pedido: ${pedido}`);
+        }
+      });
+      
+      console.log(`✅ Procesados ${Math.min(i + BATCH_SIZE, pedidosUnicos.length)}/${pedidosUnicos.length} pedidos`);
+    }
+    
+    // Verificar qué datos tenemos en el mapa
+    console.log(`🗺️ MapaShipit contiene ${Object.keys(mapaShipit).length} entradas`);
+    const primerosPedidos = Object.keys(mapaShipit).slice(0, 5);
+    primerosPedidos.forEach(pedido => {
+      console.log(`  - Pedido ${pedido}:`, mapaShipit[pedido]);
+    });
+
+    // Agregar columnas Courier y Estado a cada fila
+    archivo1 = archivo1.map((row, index) => {
+      const nuevoRow = { ...row };
+      
+      // Intentar diferentes variaciones del nombre de la columna
+      const nPedido = String(
+        row['N pedido'] || 
+        row['N Pedido'] || 
+        row['n pedido'] || 
+        row['N° pedido'] ||
+        row['N° Pedido'] ||
+        ''
+      ).trim();
+      
+      if (nPedido && mapaShipit[nPedido]) {
+        nuevoRow['Courier'] = mapaShipit[nPedido].courier || '';
+        nuevoRow['Estado'] = mapaShipit[nPedido].estado || '';
+        
+        // Log para las primeras filas para debugging
+        if (index < 5) {
+          console.log(`📝 Fila ${index + 1}: N pedido="${nPedido}" -> Courier="${nuevoRow['Courier']}", Estado="${nuevoRow['Estado']}"`);
+          console.log(`   Datos en mapaShipit:`, mapaShipit[nPedido]);
+        }
       } else {
-        nuevoRow['Courier'] = ''; // Si no hay coincidencia, dejar vacío
+        nuevoRow['Courier'] = '';
+        nuevoRow['Estado'] = '';
+        
+        // Log si no encontramos datos para debugging
+        if (index < 5) {
+          if (!nPedido) {
+            console.log(`⚠️ Fila ${index + 1}: No se encontró valor de "N pedido"`);
+            console.log(`   Columnas disponibles:`, Object.keys(row));
+          } else {
+            console.log(`⚠️ Fila ${index + 1}: N pedido="${nPedido}" no encontrado en mapaShipit`);
+            console.log(`   Pedidos en mapaShipit:`, Object.keys(mapaShipit).slice(0, 10));
+          }
+        }
       }
       
       return nuevoRow;
     });
+    
+    console.log(`✅ Archivo procesado con ${archivo1.length} filas`);
 
-    // Obtener las columnas del archivo 1 y agregar "Courier" al final
-    const columnas = [...archivosCargados.archivo1.columns, 'Courier'];
+    // Obtener las columnas del archivo 1 y agregar Courier y Estado
+    const columnas = [...archivosCargados.archivo1.columns, 'Courier', 'Estado'];
     
     // Reordenar columnas: intercambiar Cantidad (columna C) con N producto (columna B)
     const columnasReordenadas = [...columnas];
@@ -640,11 +1026,11 @@ app.get('/api/merge', (req, res) => {
     const minutes = String(now.getMinutes()).padStart(2, '0');
     const seconds = String(now.getSeconds()).padStart(2, '0');
     const timestamp = `${year}-${month}-${day}T${hours}-${minutes}-${seconds}`;
-    const outputFileName = `archivo_unido_${timestamp}.xlsx`;
+    const outputFileName = `archivo_procesado_${timestamp}.xlsx`;
     const outputPath = path.join(__dirname, 'uploads', outputFileName);
     
     // Escribir el archivo Excel con la hoja de datos y la hoja de resumen
-    escribirExcel(archivoUnido, columnasReordenadas, outputPath, true);
+    escribirExcel(archivo1, columnasReordenadas, outputPath, true);
 
     // Enviar el archivo como descarga con headers explícitos
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -675,7 +1061,7 @@ app.get('/api/merge', (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ 
-      error: 'Error al unir los archivos',
+      error: 'Error al procesar el archivo',
       message: error.message 
     });
   }

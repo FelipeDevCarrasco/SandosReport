@@ -1,16 +1,12 @@
 // Referencias a los elementos del DOM
 const fileInput1 = document.getElementById('fileInput1');
-const fileInput2 = document.getElementById('fileInput2');
 const uploadArea1 = document.getElementById('uploadArea1');
-const uploadArea2 = document.getElementById('uploadArea2');
 const fileInfo1 = document.getElementById('fileInfo1');
-const fileInfo2 = document.getElementById('fileInfo2');
 const messageContainer = document.getElementById('messageContainer');
 
 // Estado de los archivos
 let currentFiles = {
-    file1: null,
-    file2: null
+    file1: null
 };
 
 // Inicializar eventos
@@ -20,22 +16,19 @@ function init() {
     fileInput1.addEventListener('change', (e) => handleFileSelect(e, 1));
     setupDragAndDrop(uploadArea1, fileInput1, 1);
 
-    // Archivo 2
-    uploadArea2.addEventListener('click', () => fileInput2.click());
-    fileInput2.addEventListener('change', (e) => handleFileSelect(e, 2));
-    setupDragAndDrop(uploadArea2, fileInput2, 2);
-
-    // Botones de eliminar
+    // Botón de eliminar
     document.getElementById('removeFile1').addEventListener('click', (e) => {
         e.stopPropagation();
         removeFile(1);
     });
-    document.getElementById('removeFile2').addEventListener('click', (e) => {
+
+    // Botón de descarga del archivo procesado
+    document.getElementById('downloadProcessed1').addEventListener('click', (e) => {
         e.stopPropagation();
-        removeFile(2);
+        downloadProcessedFile();
     });
 
-    // Botón para unir archivos
+    // Botón para procesar archivo
     document.getElementById('btnMerge').addEventListener('click', mergeAndDownload);
 }
 
@@ -100,53 +93,28 @@ async function uploadFile(file, fileNumber) {
     progressContainer.style.display = 'flex';
     uploadArea.style.display = 'none';
 
-    // Progreso específico para cada archivo
-    let progressInterval;
-    if (fileNumber === 1) {
-        // Etapas del procesamiento del archivo 1 (Sphinx)
-        const etapas = [
-            { porcentaje: 10, mensaje: 'Cargando archivo...' },
-            { porcentaje: 25, mensaje: 'Leyendo datos...' },
-            { porcentaje: 40, mensaje: 'Eliminando filas iniciales...' },
-            { porcentaje: 55, mensaje: 'Filtrando columnas...' },
-            { porcentaje: 70, mensaje: 'Eliminando filas no válidas...' },
-            { porcentaje: 85, mensaje: 'Limpiando datos...' },
-            { porcentaje: 95, mensaje: 'Generando archivo modificado...' }
-        ];
+    // Progreso del procesamiento del archivo (Sphinx)
+    const etapas = [
+        { porcentaje: 10, mensaje: 'Cargando archivo...' },
+        { porcentaje: 25, mensaje: 'Leyendo datos...' },
+        { porcentaje: 40, mensaje: 'Eliminando filas iniciales...' },
+        { porcentaje: 55, mensaje: 'Filtrando columnas...' },
+        { porcentaje: 70, mensaje: 'Eliminando filas no válidas...' },
+        { porcentaje: 85, mensaje: 'Limpiando datos...' },
+        { porcentaje: 95, mensaje: 'Generando archivo modificado...' }
+    ];
 
-        let etapaActual = 0;
-        progressInterval = setInterval(() => {
-            if (etapaActual < etapas.length) {
-                const etapa = etapas[etapaActual];
-                progressFill.style.width = `${etapa.porcentaje}%`;
-                progressText.textContent = `${etapa.porcentaje}% - ${etapa.mensaje}`;
-                etapaActual++;
-            } else {
-                clearInterval(progressInterval);
-            }
-        }, 400);
-    } else {
-        // Etapas del procesamiento del archivo 2 (Shipit)
-        const etapas = [
-            { porcentaje: 15, mensaje: 'Cargando archivo...' },
-            { porcentaje: 35, mensaje: 'Leyendo datos...' },
-            { porcentaje: 55, mensaje: 'Filtrando columnas...' },
-            { porcentaje: 75, mensaje: 'Limpiando ID orden...' },
-            { porcentaje: 90, mensaje: 'Generando archivo modificado...' }
-        ];
-
-        let etapaActual = 0;
-        progressInterval = setInterval(() => {
-            if (etapaActual < etapas.length) {
-                const etapa = etapas[etapaActual];
-                progressFill.style.width = `${etapa.porcentaje}%`;
-                progressText.textContent = `${etapa.porcentaje}% - ${etapa.mensaje}`;
-                etapaActual++;
-            } else {
-                clearInterval(progressInterval);
-            }
-        }, 400);
-    }
+    let etapaActual = 0;
+    const progressInterval = setInterval(() => {
+        if (etapaActual < etapas.length) {
+            const etapa = etapas[etapaActual];
+            progressFill.style.width = `${etapa.porcentaje}%`;
+            progressText.textContent = `${etapa.porcentaje}% - ${etapa.mensaje}`;
+            etapaActual++;
+        } else {
+            clearInterval(progressInterval);
+        }
+    }, 400);
 
     try {
         const response = await fetch(`/api/upload/file${fileNumber}`, {
@@ -174,7 +142,7 @@ async function uploadFile(file, fileNumber) {
 
                 showMessage(result.message, 'success');
                 
-                // Verificar si ambos archivos están cargados para mostrar el botón de unir
+                // Verificar si el archivo está cargado para mostrar el botón de procesar
                 checkFilesLoaded();
             }, 500);
         } else {
@@ -206,26 +174,74 @@ function removeFile(fileNumber) {
     checkFilesLoaded();
 }
 
-// Verificar si ambos archivos están cargados
+// Verificar si el archivo está cargado
 function checkFilesLoaded() {
     const fileInfo1 = document.getElementById('fileInfo1');
-    const fileInfo2 = document.getElementById('fileInfo2');
     const mergeSection = document.getElementById('mergeSection');
     
-    if (fileInfo1.style.display !== 'none' && fileInfo2.style.display !== 'none') {
+    if (fileInfo1.style.display !== 'none') {
         mergeSection.style.display = 'block';
     } else {
         mergeSection.style.display = 'none';
     }
 }
 
-// Unir archivos y descargar
+// Descargar archivo procesado
+async function downloadProcessedFile() {
+    const btnDownload = document.getElementById('downloadProcessed1');
+    const originalText = btnDownload.textContent;
+    
+    btnDownload.disabled = true;
+    btnDownload.textContent = '⏳';
+    
+    try {
+        const response = await fetch('/api/download/processed');
+        
+        if (response.ok) {
+            // Obtener el nombre del archivo del header Content-Disposition
+            const contentDisposition = response.headers.get('Content-Disposition');
+            let filename = 'archivo_procesado.xlsx';
+            if (contentDisposition) {
+                const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                if (filenameMatch && filenameMatch[1]) {
+                    filename = filenameMatch[1].replace(/['"]/g, '').trim();
+                    if (!filename.endsWith('.xlsx')) {
+                        filename = filename.replace(/\.xlsx.*$/i, '') + '.xlsx';
+                    }
+                }
+            }
+            
+            // Descargar el archivo
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+            
+            showMessage('Archivo procesado descargado correctamente', 'success');
+        } else {
+            const error = await response.json();
+            throw new Error(error.message || error.error || 'Error al descargar el archivo procesado');
+        }
+    } catch (error) {
+        showMessage(`Error al descargar el archivo: ${error.message}`, 'error');
+    } finally {
+        btnDownload.disabled = false;
+        btnDownload.textContent = originalText;
+    }
+}
+
+// Procesar archivo y descargar
 async function mergeAndDownload() {
     const btnMerge = document.getElementById('btnMerge');
     const originalText = btnMerge.textContent;
     
     btnMerge.disabled = true;
-    btnMerge.textContent = '⏳ Uniendo archivos...';
+    btnMerge.textContent = '⏳ Procesando archivo...';
     
     try {
         const response = await fetch('/api/merge');
@@ -233,7 +249,7 @@ async function mergeAndDownload() {
         if (response.ok) {
             // Obtener el nombre del archivo del header Content-Disposition
             const contentDisposition = response.headers.get('Content-Disposition');
-            let filename = 'archivo_unido.xlsx';
+            let filename = 'archivo_procesado.xlsx';
             if (contentDisposition) {
                 // Extraer el nombre del archivo, manejando diferentes formatos
                 const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
@@ -257,13 +273,13 @@ async function mergeAndDownload() {
             document.body.removeChild(a);
             window.URL.revokeObjectURL(url);
             
-            showMessage('Archivos unidos y descargados correctamente', 'success');
+            showMessage('Archivo procesado y descargado correctamente', 'success');
         } else {
             const error = await response.json();
-            throw new Error(error.message || error.error || 'Error al unir los archivos');
+            throw new Error(error.message || error.error || 'Error al procesar el archivo');
         }
     } catch (error) {
-        showMessage(`Error al unir los archivos: ${error.message}`, 'error');
+        showMessage(`Error al procesar el archivo: ${error.message}`, 'error');
     } finally {
         btnMerge.disabled = false;
         btnMerge.textContent = originalText;
