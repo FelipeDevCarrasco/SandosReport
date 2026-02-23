@@ -1,10 +1,120 @@
 import fetch from 'node-fetch';
-import { procesarPedidosEnLotes } from '../services/shipit.service.js';
-import { escribirExcel } from '../services/report.service.js';
-import { getArchivo1 } from '../utils/fileStorage.js';
-import { generateTimestamp, getUploadsDir } from '../utils/fileStorage.js';
-import path from 'path';
-import fs from 'fs';
+import XLSX from 'xlsx';
+import { obtenerListaVentas } from '../services/shipit.service.js';
+import { getVendedorPorReferencia } from '../services/sphinx.service.js';
+import { hasValidSession } from '../services/sphinx-session.service.js';
+import { generateTimestamp } from '../utils/fileStorage.js';
+
+export async function getVentas(req, res) {
+  try {
+    const { query, fechaDesde, fechaHasta } = req.query;
+    
+    console.log(`[ventas] GET ventas query="${query || ''}" fechaDesde=${fechaDesde || ''} fechaHasta=${fechaHasta || ''}`);
+    
+    const result = await obtenerListaVentas(
+      query || '',
+      1,
+      500,
+      fechaDesde || '',
+      fechaHasta || '',
+      true
+    );
+
+    console.log(`[ventas] Respuesta: ${result.ventas?.length ?? 0} ventas`);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('[ventas] Error:', error.message);
+    res.status(500).json({
+      error: 'Error al obtener ventas de Shipit',
+      message: error.message
+    });
+  }
+}
+
+export async function getVendedores(req, res) {
+  try {
+    const { referencias } = req.body;
+    
+    if (!referencias || !Array.isArray(referencias)) {
+      return res.json({ success: true, vendedores: {} });
+    }
+
+    if (!hasValidSession()) {
+      return res.json({ success: true, vendedores: {} });
+    }
+
+    const vendedores = {};
+    const BATCH_SIZE = 10;
+
+    for (let i = 0; i < referencias.length; i += BATCH_SIZE) {
+      const batch = referencias.slice(i, i + BATCH_SIZE);
+      const batchResults = await Promise.all(
+        batch.map(async (ref) => {
+          const vendedor = await getVendedorPorReferencia(ref).catch(() => '');
+          return { ref, vendedor };
+        })
+      );
+      batchResults.forEach(({ ref, vendedor }) => {
+        vendedores[ref] = vendedor;
+      });
+    }
+
+    res.json({ success: true, vendedores });
+  } catch (error) {
+    console.error('[vendedores] Error:', error.message);
+    res.json({ success: true, vendedores: {} });
+  }
+}
+
+export async function exportVentasExcel(req, res) {
+  try {
+    const { query } = req.query;
+    const result = await obtenerListaVentas(query || '', 1, 10000);
+    let ventas = result.ventas || [];
+
+    if (hasValidSession() && ventas.length > 0) {
+      ventas = await Promise.all(
+        ventas.map(async (v) => {
+          const ref = v.idVenta || (v.reference ? `#${v.reference}` : '');
+          const vendedor = ref ? await getVendedorPorReferencia(ref) : '';
+          return { ...v, vendedor };
+        })
+      );
+    }
+
+    const columns = [
+      'Estado', 'ID Venta', 'Fecha Creación', 'Vendedor', 'Destinatario', 'Courier', 'Dirección', 'Comuna'
+    ];
+    const rows = ventas.map((v) => [
+      v.estado || '',
+      v.idVenta || '',
+      v.fechaCreacion || '',
+      v.vendedor ?? '',
+      v.destinatario || '',
+      v.courier || '',
+      v.direccion || '',
+      v.comuna || ''
+    ]);
+
+    const worksheetData = [columns, ...rows];
+    const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Ventas');
+
+    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    const filename = `reporte-ventas-${generateTimestamp()}.xlsx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (error) {
+    console.error('Error exportVentasExcel:', error.message);
+    res.status(500).json({
+      error: 'Error al generar el reporte Excel',
+      message: error.message
+    });
+  }
+}
 
 export async function getOrder(req, res) {
   try {
@@ -71,104 +181,6 @@ export async function getOrder(req, res) {
     res.status(500).json({ 
       error: 'Error al consultar la API de Shipit',
       message: error.message
-    });
-  }
-}
-
-export async function mergeAndDownload(req, res) {
-  try {
-    const archivo1 = getArchivo1();
-    
-    if (!archivo1) {
-      return res.status(400).json({ 
-        error: 'El archivo debe estar cargado para procesarlo' 
-      });
-    }
-
-    let archivo1Data = [...archivo1.data];
-
-    console.log(`📊 Procesando ${archivo1Data.length} filas...`);
-    
-    // Extraer pedidos únicos desde la columna Doc
-    // Juntar el texto de Doc: "BVE 12345" → "BVE12345"
-    const pedidosUnicos = [...new Set(archivo1Data.map(row => {
-      const doc = String(row['Doc'] || '').trim();
-      // Juntar el texto eliminando espacios: "BVE 12345" → "BVE12345"
-      const pedido = doc.replace(/\s+/g, '');
-      return pedido;
-    }).filter(p => p && p !== ''))];
-    
-    console.log(`📦 Encontrados ${pedidosUnicos.length} pedidos únicos`);
-
-    const mapaShipit = await procesarPedidosEnLotes(pedidosUnicos);
-
-    archivo1Data = archivo1Data.map((row) => {
-      const nuevoRow = { ...row };
-      
-      // Usar columna Doc y juntar el texto: "BVE 12345" → "BVE12345"
-      const doc = String(row['Doc'] || '').trim();
-      const referencia = doc.replace(/\s+/g, ''); // Elimina todos los espacios
-      
-      if (referencia && mapaShipit[referencia]) {
-        nuevoRow['Courier'] = mapaShipit[referencia].courier || '';
-        nuevoRow['Estado'] = mapaShipit[referencia].estado || '';
-        nuevoRow['Courier Status'] = mapaShipit[referencia].courier_status || '';
-      } else {
-        nuevoRow['Courier'] = '';
-        nuevoRow['Estado'] = '';
-        nuevoRow['Courier Status'] = '';
-      }
-      
-      return nuevoRow;
-    });
-    
-    console.log(`✅ Archivo procesado con ${archivo1Data.length} filas`);
-
-    const columnas = [...archivo1.columns, 'Courier', 'Estado', 'Courier Status'];
-    
-    const columnasReordenadas = [...columnas];
-    const indiceCantidad = columnasReordenadas.indexOf('Cantidad');
-    const indiceProducto = columnasReordenadas.indexOf('N producto');
-    
-    if (indiceCantidad !== -1 && indiceProducto !== -1) {
-      [columnasReordenadas[indiceCantidad], columnasReordenadas[indiceProducto]] = 
-      [columnasReordenadas[indiceProducto], columnasReordenadas[indiceCantidad]];
-    }
-
-    const timestamp = generateTimestamp();
-    const outputFileName = `archivo_procesado_${timestamp}.xlsx`;
-    const outputPath = path.join(getUploadsDir(), outputFileName);
-    
-    escribirExcel(archivo1Data, columnasReordenadas, outputPath, true);
-
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    const encodedFileName = encodeURIComponent(outputFileName);
-    res.setHeader('Content-Disposition', `attachment; filename="${outputFileName}"; filename*=UTF-8''${encodedFileName}`);
-    
-    const fileStream = fs.createReadStream(outputPath);
-    fileStream.pipe(res);
-    
-    fileStream.on('end', () => {
-      setTimeout(() => {
-        if (fs.existsSync(outputPath)) {
-          fs.unlinkSync(outputPath);
-        }
-      }, 1000);
-    });
-    
-    fileStream.on('error', (err) => {
-      console.error('Error al descargar el archivo:', err);
-      if (!res.headersSent) {
-        res.status(500).json({ 
-          error: 'Error al generar el archivo',
-          message: err.message 
-        });
-      }
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      error: 'Error al procesar el archivo',
-      message: error.message 
     });
   }
 }

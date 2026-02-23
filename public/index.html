@@ -3,65 +3,117 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sandos Report - Procesamiento de Archivos Excel</title>
+    <title>Sandos Report - Ventas Shipit</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>📊 Sandos Report</h1>
-            <p class="subtitle">Procesa archivos Excel de Sphinx</p>
+            <div class="header-content">
+                <div>
+                    <h1>📊 Sandos Report</h1>
+                    <p class="subtitle">Ventas de Shipit (canal Sphinx)</p>
+                </div>
+                <div class="header-actions">
+                    <button class="btn-archivos" id="btnArchivos" title="Ver archivos generados">📁 Archivos</button>
+                    <button class="btn-logout" id="btnLogout" title="Cerrar sesión">Salir</button>
+                </div>
+            </div>
         </header>
 
         <main>
-            <div class="upload-section">
-                <!-- Archivo 1 -->
-                <div class="file-upload-card">
-                    <h2>Archivo de Sphinx</h2>
-                    <div class="upload-area" id="uploadArea1">
-                        <input type="file" id="fileInput1" accept=".xlsx,.xls" hidden>
-                        <div class="upload-content">
-                            <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                <polyline points="17 8 12 3 7 8"></polyline>
-                                <line x1="12" y1="3" x2="12" y2="15"></line>
-                            </svg>
-                            <p class="upload-text">Carga el archivo de Sphinx</p>
-                            <p class="upload-hint">Solo archivos .xlsx o .xls</p>
-                        </div>
-                    </div>
-                    <div class="file-info" id="fileInfo1" style="display: none;">
-                        <div class="file-details">
-                            <span class="file-name" id="fileName1"></span>
-                            <span class="file-stats" id="fileStats1"></span>
-                        </div>
-                        <div class="file-actions">
-                            <button class="btn-download" id="downloadProcessed1" title="Descargar archivo procesado">⬇️</button>
-                            <button class="btn-remove" id="removeFile1">✕</button>
-                        </div>
-                    </div>
-                    <div class="progress-container" id="progressContainer1" style="display: none;">
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="progressFill1"></div>
-                        </div>
-                        <span class="progress-text" id="progressText1">0%</span>
-                    </div>
+            <div class="ventas-toolbar">
+                <input type="text" id="searchInput" placeholder="Buscar por referencia..." class="search-input">
+                <div class="date-filters">
+                    <label>Desde: <input type="date" id="fechaDesde" required></label>
+                    <label>Hasta: <input type="date" id="fechaHasta" required></label>
+                    <button class="btn-buscar" id="btnBuscar">🔍 Buscar</button>
+                </div>
+                <button class="btn-excel" id="btnExcel">Generar reporte en excel</button>
+                <div id="reportProgress" class="report-progress" aria-hidden="true">
+                    <div class="report-progress-bar"></div>
+                    <span class="report-progress-text">Generando reporte...</span>
                 </div>
             </div>
 
-            <!-- Botón para procesar archivo -->
-            <div class="merge-section" id="mergeSection" style="display: none;">
-                <button class="btn-merge" id="btnMerge">
-                    📊 Procesar Archivo y Descargar
-                </button>
+            <div class="results-count" id="resultsCount"></div>
+
+            <div class="table-wrapper">
+                <table class="ventas-table">
+                    <thead>
+                        <tr>
+                            <th>Estado</th>
+                            <th>ID Doc</th>
+                            <th>Tipo</th>
+                            <th>Fecha Creación</th>
+                            <th>Vendedor</th>
+                            <th>Courier</th>
+                            <th>Comuna</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ventasBody">
+                        <tr class="loading-row">
+                            <td colspan="8">Cargando ventas...</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
 
-            <!-- Mensajes de estado -->
             <div class="message-container" id="messageContainer"></div>
         </main>
+    </div>
+
+    <div id="modalDetalle" class="modal-overlay" aria-hidden="true">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Detalle - <span id="modalTitulo"></span></h2>
+                <button type="button" class="modal-close" id="modalClose" aria-label="Cerrar">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="modalLoading" class="modal-loading">Cargando detalle...</div>
+                <div id="modalContent" class="modal-content" style="display: none;">
+                    <table class="modal-table">
+                        <thead>
+                            <tr>
+                                <th>Doc</th>
+                                <th>Cantidad</th>
+                                <th>N producto</th>
+                                <th>SKU</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modalTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="modalArchivos" class="modal-overlay" aria-hidden="true">
+        <div class="modal modal-archivos">
+            <div class="modal-header">
+                <h2>📁 Archivos Generados</h2>
+                <button type="button" class="modal-close" id="modalArchivosClose" aria-label="Cerrar">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="archivosLoading" class="modal-loading">Cargando archivos...</div>
+                <div id="archivosContent" class="archivos-content" style="display: none;">
+                    <p class="archivos-empty" id="archivosEmpty" style="display: none;">No hay archivos generados</p>
+                    <ul class="archivos-list" id="archivosList"></ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="jobNotification" class="job-notification" aria-hidden="true">
+        <div class="job-notification-content">
+            <span class="job-notification-icon">✅</span>
+            <span class="job-notification-text">Reporte listo para descargar</span>
+            <button class="job-notification-btn" id="jobDownloadBtn">Descargar</button>
+            <button class="job-notification-close" id="jobNotificationClose">&times;</button>
+        </div>
     </div>
 
     <script type="module" src="js/main.js"></script>
 </body>
 </html>
-

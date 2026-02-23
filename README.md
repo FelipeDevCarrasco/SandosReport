@@ -1,6 +1,6 @@
 # Sandos Report
 
-Proyecto Node.js con interfaz web para leer y unir archivos Excel.
+Proyecto Node.js para generar reportes combinando datos de Shipit y Sphinx por referencia (sin subir archivos).
 
 ## Instalación Local
 
@@ -279,20 +279,18 @@ sudo systemctl reload nginx
 
 ## Características
 
-- ✅ Interfaz web moderna y responsive
-- ✅ Carga de archivos por clic o arrastrar y soltar
-- ✅ Barra de progreso visual
-- ✅ Validación de tipos de archivo
-- ✅ Información detallada de archivos cargados
-- ✅ Procesamiento automático de archivos Excel
-- ✅ Unión de archivos con búsqueda VLOOKUP
-- ✅ Descarga automática del resultado
+- ✅ Generar reportes por referencia (Shipit)
+- ✅ Consulta automática a Sphinx (factura/boleta)
+- ✅ Integración con Shipit (courier, estado)
+- ✅ Excel con datos combinados y resumen por categoría
+- ✅ Interfaz web simple (referencia + tipo)
 
 ## Estructura
 
-- `index.js` - Servidor Express con endpoints para cargar archivos
-- `public/` - Frontend (HTML, CSS, JavaScript)
-- `uploads/` - Archivos temporales cargados (se crea automáticamente)
+- `index.js` - Servidor Express
+- `src/services/report-combined.service.js` - Combina Shipit + Sphinx por referencia
+- `public/` - Frontend (referencia + generar reporte)
+- `uploads/` - Archivos temporales generados
 - `Dockerfile` - Configuración de Docker
 - `docker-compose.yml` - Orquestación de contenedores
 
@@ -307,18 +305,44 @@ sudo systemctl reload nginx
 
 ## API Endpoints
 
-### Endpoints de archivos
+### Reporte (nuevo flujo)
 
-- `POST /api/upload/file1` - Cargar y procesar archivo de Sphinx
-- `GET /api/status` - Obtener estado de los archivos cargados
-- `GET /api/download/processed` - Descargar archivo procesado
-- `GET /api/merge` - Procesar y descargar archivo con resumen
+- `GET /api/report/generate?reference=BVE%204201&tipo=factura` - Genera Excel combinando Sphinx + Shipit
 
 ### Endpoints de Shipit
 
 - `GET /api/shipit/order/:reference` - Obtener información de una orden desde Shipit
 
-**Ejemplo de uso:**
+### Endpoints de Sphinx
+
+- `GET /api/sphinx/status` - Verificar configuración y conexión con Sphinx
+- `GET /api/sphinx/factura/:folio` - ConsultarFacturaID - Consulta una factura por folio
+- `GET /api/sphinx/boleta/:folio` - ConsultarBoletas - Consulta una boleta por folio
+- `POST /api/sphinx/session` - Actualizar cookies manualmente (cuando expira la sesión)
+- `POST /api/sphinx/refresh` - Renovar sesión automáticamente (login con Puppeteer)
+
+**Ejemplo consultar factura:**
+```bash
+curl http://localhost:3000/api/sphinx/factura/4201
+# Con parámetros opcionales: ?fechaDesde=2026-02-16&fechaHasta=2026-02-23&detalle=true
+
+curl http://localhost:3000/api/sphinx/boleta/25036
+# Boletas: detalle=true por defecto, idTipo 74
+```
+
+**Actualizar sesión manualmente** (cuando Sphinx cierra por inactividad):
+```bash
+curl -X POST http://localhost:3000/api/sphinx/session \
+  -H "Content-Type: application/json" \
+  -d '{"jsessionId":"NUEVO_JSESSIONID","sphinxSession":"NUEVO_SPHINX"}'
+```
+
+**Renovar sesión automáticamente** (requiere `npm install puppeteer` y SPHINX_USER, SPHINX_PASSWORD):
+```bash
+curl -X POST http://localhost:3000/api/sphinx/refresh
+```
+
+**Ejemplo de uso (Shipit):**
 ```bash
 curl http://localhost:3000/api/shipit/order/15744
 ```
@@ -333,6 +357,16 @@ Crea un archivo `.env` en la raíz del proyecto con las siguientes variables:
 PORT=3000
 SHIPIT_EMAIL=tu_email@ejemplo.com
 SHIPIT_ACCESS_TOKEN=tu_access_token_aqui
+
+# Sphinx (Documento$reporte.service - cookies de sesión)
+SPHINX_BASE_URL=https://sandos.sphinx.cl
+SPHINX_JSESSIONID=tu_jsessionid
+SPHINX_SESSION=tu_token_sphinx
+SPHINX_BASE=sandos
+
+# Opcional: para renovar sesión automáticamente (POST /api/sphinx/refresh)
+SPHINX_USER=usuario_sphinx
+SPHINX_PASSWORD=clave_sphinx
 ```
 
 ### Variables disponibles:
@@ -341,6 +375,12 @@ SHIPIT_ACCESS_TOKEN=tu_access_token_aqui
 - `NODE_ENV` - Entorno de ejecución (production/development)
 - `SHIPIT_EMAIL` - Email para autenticación en la API de Shipit
 - `SHIPIT_ACCESS_TOKEN` - Token de acceso para la API de Shipit
+- `SPHINX_BASE_URL` - URL base de Sphinx (default: https://sandos.sphinx.cl)
+- `SPHINX_JSESSIONID` - Cookie JSESSIONID (o se guarda en data/sphinx-session.json)
+- `SPHINX_SESSION` - Cookie SPHINX (o se guarda en data/sphinx-session.json)
+- `SPHINX_BASE` - Base/tenant Sphinx (default: sandos)
+- `SPHINX_USER` - Usuario para login automático (opcional)
+- `SPHINX_PASSWORD` - Contraseña para login automático (opcional)
 
 ### Configuración con Docker
 

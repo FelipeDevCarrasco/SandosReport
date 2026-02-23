@@ -2,10 +2,12 @@ services:
   sandos-report:
     build: .
     container_name: sandos-report
+    env_file: .env
     ports:
       - "3000:3000"
     volumes:
       - ./uploads:/app/uploads
+      - ./data:/app/data
     restart: unless-stopped
     environment:
       - NODE_ENV=production
