@@ -7,4 +7,5 @@ node_modules/
 *.log
 uploads/*
 !uploads/.gitkeep
+data/sphinx-session.json
 

@@ -171,6 +171,15 @@ export const EXCEL_CONFIG = {
 export const SHIPIT_CONFIG = {
   BATCH_SIZE: 10,
   ORDERS_API: 'https://orders.shipit.cl/v/orders',
-  SHIPMENTS_API: 'https://api.shipit.cl/v/shipments'
+  SHIPMENTS_API: 'https://api.shipit.cl/v/shipments',
+  SEARCH_API: 'https://api.shipit.cl/v/searchs'
+};
+
+export const SPHINX_CONFIG = {
+  BASE_URL: 'https://sandos.sphinx.cl',
+  REPORTE_SERVICE: '/Documento$reporte.service',
+  DEFAULT_ID_TIPO: '70', // Tipo documento factura
+  DEFAULT_ID_TIPO_BOLETA: '74', // Tipo documento boleta
+  DEFAULT_ID_SUCURSAL: '1',
 };
 

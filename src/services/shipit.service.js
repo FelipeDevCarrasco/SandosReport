@@ -204,3 +204,122 @@ export async function procesarPedidosEnLotes(pedidosUnicos) {
   return mapaShipit;
 }
 
+/**
+ * Obtiene la lista de ventas/órdenes desde Shipit (Orders API)
+ * Muestra solo orders, no shipments, tal como en app.shipit.cl/orders
+ */
+export async function obtenerListaVentas(query = '', page = 1, per = 50) {
+  const shipitEmail = process.env.SHIPIT_EMAIL;
+  const shipitAccessToken = process.env.SHIPIT_ACCESS_TOKEN;
+
+  if (!shipitEmail || !shipitAccessToken) {
+    throw new Error('SHIPIT_EMAIL y SHIPIT_ACCESS_TOKEN deben estar configurados');
+  }
+
+  const headers = {
+    'X-Shipit-Email': shipitEmail,
+    'X-Shipit-Access-Token': shipitAccessToken,
+    'Accept': 'application/vnd.orders.v1',
+    'Content-Type': 'application/json'
+  };
+
+  const params = new URLSearchParams();
+  params.set('state', 'confirmed');
+  if (query.trim()) params.set('query', query.trim());
+  params.set('page', page);
+  params.set('per', per);
+
+  const ordersUrl = `${SHIPIT_CONFIG.ORDERS_API}?${params.toString()}`;
+  const ordersRes = await fetch(ordersUrl, { method: 'GET', headers });
+
+  if (!ordersRes.ok) {
+    const text = await ordersRes.text();
+    throw new Error(`Error Orders Shipit ${ordersRes.status}: ${text}`);
+  }
+
+  const data = await ordersRes.json();
+  const orders = data?.orders ?? (Array.isArray(data) ? data : []);
+  const ventas = (Array.isArray(orders) ? orders : (orders?.data || [])).map(mapOrderToVenta);
+
+  console.log(`[shipit] Orders API state=confirmed: ${ventas.length} ventas recibidas`);
+
+  return {
+    ventas,
+    total: data?.total ?? ventas.length
+  };
+}
+
+function mapShipmentToVenta(s) {
+  const ref = s.reference ? (s.reference.startsWith('#') ? s.reference : `#${s.reference}`) : '';
+  const state = mapEstado(s.status || s.courier_status);
+  const created = s.created_at ? formatDate(s.created_at) : '';
+  const address = s.address?.full || s.address?.street || '';
+  const commune = s.address?.commune_name || '';
+  return {
+    estado: state,
+    idVenta: ref,
+    fechaCreacion: created,
+    fechaIntegracion: created,
+    canalVenta: s.origin?.name || s.seller?.name || 'sphinx',
+    destinatario: s.full_name || s.destiny?.full_name || '',
+    courier: s.courier_for_client || s.courier?.client || '',
+    direccion: address,
+    comuna: commune,
+    tipoEntrega: s.destiny || 'Domicilio',
+    reference: (s.reference || '').replace(/^#/, '')
+  };
+}
+
+function mapOrderToVenta(o) {
+  const ref = o.reference ? (o.reference.startsWith('#') ? o.reference : `#${o.reference}`) : '';
+  const state = mapEstadoOrden(o.state);
+  const created = o.state_track?.confirmed || o.created_at || o.seller?.created_at || '';
+  const destiny = o.destiny || {};
+  const address = destiny.street && destiny.number
+    ? `${(destiny.street || '').toUpperCase()} ${destiny.number}${destiny.complement ? ', ' + destiny.complement : ''}`
+    : destiny.full || '';
+  return {
+    estado: state,
+    idVenta: ref,
+    fechaCreacion: formatDate(created),
+    fechaIntegracion: formatDate(created),
+    canalVenta: o.seller?.name || 'sphinx',
+    destinatario: destiny.full_name || '',
+    courier: o.courier?.client || '',
+    direccion: address,
+    comuna: destiny.commune_name || '',
+    tipoEntrega: destiny.kind === 'shopping_retired' ? 'Retiro' : 'Domicilio',
+    reference: (o.reference || '').replace(/^#/, '')
+  };
+}
+
+function mapEstado(status) {
+  if (!status) return '';
+  const s = String(status).toLowerCase();
+  if (s.includes('cancel') || s === 'canceled') return 'Cancelada';
+  if (s.includes('deliver') || s.includes('entreg')) return 'Entregado';
+  if (s.includes('confirm') || s.includes('prepar')) return 'Listo para enviar';
+  if (s.includes('transit') || s.includes('tránsito')) return 'En tránsito';
+  return status;
+}
+
+function mapEstadoOrden(state) {
+  if (!state) return '';
+  const s = String(state).toLowerCase();
+  if (s === 'canceled' || s === 'cancelled' || s === '3') return 'Cancelada';
+  if (s === 'deliver' || s === 'delivered' || s === '2') return 'Enviado';
+  if (s === 'confirmed' || s === 'confirm' || s === '1') return 'Listo para enviar';
+  if (s === 'draft' || s === '0') return 'Borrador';
+  return state;
+}
+
+function formatDate(str) {
+  if (!str) return '';
+  try {
+    const d = new Date(str);
+    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  } catch {
+    return str;
+  }
+}
+

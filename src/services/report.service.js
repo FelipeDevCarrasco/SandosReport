@@ -74,7 +74,7 @@ export function escribirExcel(data, columns, outputPath, incluirResumen = false)
     
     const worksheetData = [columns];
     datosSinGlobal.forEach(row => {
-      const rowData = columns.map(col => row[col] || '');
+      const rowData = columns.map(col => (col === '' ? '' : (row[col] || '')));
       worksheetData.push(rowData);
     });
     
@@ -90,7 +90,7 @@ export function escribirExcel(data, columns, outputPath, incluirResumen = false)
       console.log(`📦 Creando hoja "global" con ${datosGlobal.length} registros`);
       const globalData = [columns];
       datosGlobal.forEach(row => {
-        const rowData = columns.map(col => row[col] || '');
+        const rowData = columns.map(col => (col === '' ? '' : (row[col] || '')));
         globalData.push(rowData);
       });
       const globalWorksheet = XLSX.utils.aoa_to_sheet(globalData);
