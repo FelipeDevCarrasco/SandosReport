@@ -59,6 +59,18 @@ export function generarResumen(data) {
 }
 
 /**
+ * Cuenta pedidos únicos por Doc (referencia)
+ */
+function contarPedidosUnicos(data) {
+  const docs = new Set();
+  data.forEach(row => {
+    const doc = String(row['Doc'] || '').trim();
+    if (doc) docs.add(doc);
+  });
+  return docs.size;
+}
+
+/**
  * Escribe un archivo Excel con los datos proporcionados y opcionalmente una hoja de resumen
  */
 export function escribirExcel(data, columns, outputPath, incluirResumen = false) {
@@ -70,9 +82,14 @@ export function escribirExcel(data, columns, outputPath, incluirResumen = false)
       return courier !== 'global_tracking';
     });
     
-    console.log(`📊 Total de registros: ${data.length}, Registros sin global_tracking: ${datosSinGlobal.length}`);
+    const pedidosSinGlobal = contarPedidosUnicos(datosSinGlobal);
+    console.log(`📊 Total de registros: ${data.length}, Registros sin global_tracking: ${datosSinGlobal.length}, Pedidos: ${pedidosSinGlobal}`);
     
-    const worksheetData = [columns];
+    const worksheetData = [
+      [`Total Pedidos: ${pedidosSinGlobal}`, '', '', '', '', '', '', '', ''],
+      [],
+      columns
+    ];
     datosSinGlobal.forEach(row => {
       const rowData = columns.map(col => (col === '' ? '' : (row[col] || '')));
       worksheetData.push(rowData);
@@ -87,8 +104,13 @@ export function escribirExcel(data, columns, outputPath, incluirResumen = false)
     });
     
     if (datosGlobal.length > 0) {
-      console.log(`📦 Creando hoja "global" con ${datosGlobal.length} registros`);
-      const globalData = [columns];
+      const pedidosGlobal = contarPedidosUnicos(datosGlobal);
+      console.log(`📦 Creando hoja "Global" con ${datosGlobal.length} registros, ${pedidosGlobal} pedidos`);
+      const globalData = [
+        [`Total Pedidos: ${pedidosGlobal}`, '', '', '', '', '', '', '', ''],
+        [],
+        columns
+      ];
       datosGlobal.forEach(row => {
         const rowData = columns.map(col => (col === '' ? '' : (row[col] || '')));
         globalData.push(rowData);
