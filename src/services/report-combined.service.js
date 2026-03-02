@@ -182,18 +182,30 @@ export async function generarReporteExcelVentas(query = '', fechaDesde = '', fec
 
   reportProgress(0, 'Obteniendo lista de ventas...');
   const { ventas } = await obtenerListaVentas(query, 1, 500, fechaDesde, fechaHasta, true);
-  const referencias = (ventas || [])
-    .map((v) => (v.reference || v.idVenta || '').replace(/^#/, '').trim())
-    .filter(Boolean);
+  
+  if (!ventas || ventas.length === 0) {
+    throw new Error('No hay ventas con referencia para generar el reporte');
+  }
 
-  const referenciasUnicas = [...new Set(referencias)];
+  const mapaVentas = {};
+  ventas.forEach(v => {
+    const ref = (v.reference || v.idVenta || '').replace(/^#/, '').trim();
+    if (ref) {
+      mapaVentas[ref] = {
+        estado: v.estado || '',
+        courier: v.courier || '',
+        tipo: v.tipo || 'venta'
+      };
+    }
+  });
+
+  const referenciasUnicas = Object.keys(mapaVentas);
   if (referenciasUnicas.length === 0) {
     throw new Error('No hay ventas con referencia para generar el reporte');
   }
 
-  reportProgress(10, `Procesando ${referenciasUnicas.length} referencias en Shipit...`);
+  reportProgress(10, `Procesando ${referenciasUnicas.length} referencias...`);
   const todasLasFilas = [];
-  const mapaShipit = await procesarPedidosEnLotes(referenciasUnicas);
 
   const BATCH_SIZE = 5;
   const totalRefs = referenciasUnicas.length;
@@ -209,16 +221,14 @@ export async function generarReporteExcelVentas(query = '', fechaDesde = '', fec
           obtenerDetallePorReferencia(reference),
           getVendedorPorReferencia('#' + reference).catch(() => '')
         ]);
-        const datosShipit = mapaShipit[reference] || {
+        const datosVenta = mapaVentas[reference] || {
           courier: '',
-          estado: '',
-          courier_status: ''
+          estado: ''
         };
         return rows.map((row) => ({
           ...row,
-          Courier: datosShipit.courier,
-          Estado: datosShipit.estado,
-          'Courier Status': datosShipit.courier_status,
+          Courier: datosVenta.courier,
+          Estado: datosVenta.estado,
           Vendedor: vendedor || ''
         }));
       } catch (err) {
@@ -236,7 +246,7 @@ export async function generarReporteExcelVentas(query = '', fechaDesde = '', fec
   }
 
   reportProgress(95, 'Generando archivo Excel...');
-  const columns = ['Doc', '', '', 'Cantidad', 'N producto', 'SKU', 'Courier', 'Estado', 'Courier Status', 'Vendedor'];
+  const columns = ['Doc', '', '', 'Cantidad', 'N producto', 'SKU', 'Courier', 'Estado', 'Vendedor'];
   
   let outputPath, outputFileName;
   if (outputFilePath) {
