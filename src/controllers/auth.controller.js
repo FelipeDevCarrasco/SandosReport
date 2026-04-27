@@ -26,9 +26,11 @@ export async function login(req, res) {
     
     const token = createSession(email);
     
+    // Con NODE_ENV=production, secure:true rompe el login en http:// (IP:puerto). Solo Secure si hay HTTPS.
+    const secureCookie = String(process.env.COOKIE_SECURE || '').toLowerCase() === 'true';
     res.cookie('auth_token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: secureCookie,
       maxAge: 24 * 60 * 60 * 1000,
       sameSite: 'strict'
     });

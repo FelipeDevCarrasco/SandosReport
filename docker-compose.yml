@@ -12,4 +12,6 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
+      # Con HTTPS (proxy/nginx/Cloud Run): COOKIE_SECURE=true. En http:// dejar sin definir o false.
+      # - COOKIE_SECURE=true
 
